@@ -28,6 +28,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
+# This comment changes the workflow without changing what it does.
 jobs:
   gate:
     strategy:
