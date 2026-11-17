@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run after both checkouts and the gate's build: gate the head tree against the base tree and keep its output and errors in RESULTS.
+# Run after both checkouts and the gate's build: gate the head tree against the base tree, keep its output and errors in RESULTS, summarize and exit as it did.
 set -euo pipefail
 
 base=$(git -C "$BASE_TREE" rev-parse HEAD)
@@ -9,4 +9,12 @@ code=0
 "$BENCHGATE" -base "$BASE_TREE" -head "$HEAD_TREE" -base-label "$base" -head-label "$head" \
 	-config "$HEAD_TREE/$INPUT_CONFIG" -out "$RESULTS/out" 2>"$RESULTS/stderr.txt" || code=$?
 cat "$RESULTS/stderr.txt" >&2
+if ((code <= 1)); then
+	cat "$RESULTS/out/report.md" >>"$GITHUB_STEP_SUMMARY"
+else
+	{
+		printf '# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n' "$code"
+		sed 's/^/    /' "$RESULTS/stderr.txt"
+	} >>"$GITHUB_STEP_SUMMARY"
+fi
 exit "$code"

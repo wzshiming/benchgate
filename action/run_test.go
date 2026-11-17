@@ -145,3 +145,26 @@ func TestResultsHoldTheReportTheSamplesAndTheGatesErrors(t *testing.T) {
 		t.Errorf("log %q, want the gate's errors %q in it", s.log, standInStderr)
 	}
 }
+
+func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
+	t.Parallel()
+	fail := "# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n    benchgate: stand-in error\n    \tsecond line\n"
+	for _, c := range []struct {
+		code    int
+		summary string
+	}{
+		{0, standInReport},
+		{1, standInReport},
+		{2, fmt.Sprintf(fail, 2)},
+		{3, fmt.Sprintf(fail, 3)},
+	} {
+		t.Run(fmt.Sprint("gate exiting ", c.code), func(t *testing.T) {
+			t.Parallel()
+			env, _, _ := gating(t, c.code)
+			s := run(t, "run.sh", t.TempDir(), env)
+			if s.code != c.code || s.summary != c.summary {
+				t.Errorf("step exited %d with the summary %q, want %d with %q\n%s", s.code, s.summary, c.code, c.summary, s.log)
+			}
+		})
+	}
+}

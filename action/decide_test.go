@@ -121,11 +121,12 @@ func checkout(t *testing.T, repo, ref string, depth int) string {
 	return dir
 }
 
-// step is what a script run as a step of the Action left: its exit code, its log and its outputs.
+// step is what a script run as a step of the Action left: its exit code, its log, its outputs and its job summary.
 type step struct {
 	code    int
 	log     string
 	outputs map[string]string
+	summary string
 }
 
 // run runs script in dir with env added to the environment, as a step of the Action runs it.
@@ -135,12 +136,14 @@ func run(t *testing.T, script, dir string, env map[string]string) step {
 	if err != nil {
 		t.Fatal(err)
 	}
-	output := filepath.Join(t.TempDir(), "output")
-	if err := os.WriteFile(output, nil, 0o644); err != nil {
-		t.Fatal(err)
+	output, summary := filepath.Join(t.TempDir(), "output"), filepath.Join(t.TempDir(), "summary")
+	for _, file := range []string{output, summary} {
+		if err := os.WriteFile(file, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	cmd := exec.Command(path)
-	cmd.Dir, cmd.Env = dir, append(environ(), "GITHUB_OUTPUT="+output)
+	cmd.Dir, cmd.Env = dir, append(environ(), "GITHUB_OUTPUT="+output, "GITHUB_STEP_SUMMARY="+summary)
 	for name, value := range env {
 		cmd.Env = append(cmd.Env, name+"="+value)
 	}
@@ -160,7 +163,11 @@ func run(t *testing.T, script, dir string, env map[string]string) step {
 		}
 		outputs[name] = value
 	}
-	return step{cmd.ProcessState.ExitCode(), string(log), outputs}
+	summarized, err := os.ReadFile(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return step{cmd.ProcessState.ExitCode(), string(log), outputs, string(summarized)}
 }
 
 // wantFailure fails t unless s exited 1 without outputs, with an error annotation containing text.
