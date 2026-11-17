@@ -17,3 +17,4 @@ if [[ -z $INPUT_BASE || -z $INPUT_HEAD ]]; then
 		fail "a pull_request event takes both inputs base and head, or neither"
 	fi
 fi
+printf 'head=%s\n' "$GITHUB_SHA" >>"$GITHUB_OUTPUT"
