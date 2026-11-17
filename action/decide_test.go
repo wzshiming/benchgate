@@ -108,11 +108,17 @@ func checkoutHead(t *testing.T, repo string, env map[string]string, depth int) (
 	if event.code != 0 || event.outputs["head"] == "" {
 		t.Fatalf("event.sh exited %d with outputs %q, want 0 naming the head\n%s", event.code, event.outputs, event.log)
 	}
-	head = t.TempDir()
-	git(t, head, "init", "-q")
-	git(t, head, "fetch", "-q", "--depth", strconv.Itoa(depth), "file://"+repo, event.outputs["head"])
-	git(t, head, "checkout", "-q", "--detach", "FETCH_HEAD")
-	return head, event
+	return checkout(t, repo, event.outputs["head"], depth), event
+}
+
+// checkout checks out ref from repo at depth into a new directory, as actions/checkout does, and returns the directory.
+func checkout(t *testing.T, repo, ref string, depth int) string {
+	t.Helper()
+	dir := t.TempDir()
+	git(t, dir, "init", "-q")
+	git(t, dir, "fetch", "-q", "--depth", strconv.Itoa(depth), "file://"+repo, ref)
+	git(t, dir, "checkout", "-q", "--detach", "FETCH_HEAD")
+	return dir
 }
 
 // step is what a script run as a step of the Action left: its exit code, its log and its outputs.
