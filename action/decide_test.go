@@ -177,6 +177,25 @@ func wantComparison(t *testing.T, s step, base, measureIdentical string) {
 	}
 }
 
+func TestPullRequestChangingTheGateForcesMeasurement(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, path, other string }{
+		{"configuration", "test/benchgate.json", ".github/workflows/gate.yml"},
+		{"calling workflow", ".github/workflows/gate.yml", "test/benchgate.json"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, base := pullRequest(t, map[string]string{c.path: changed}, nil)
+			head, _ := checkoutHead(t, repo, pullRequestEvent(merge), 2)
+			compared := run(t, "compare.sh", head, pullRequestEvent(merge))
+			wantComparison(t, compared, base, "true")
+			if !strings.Contains(compared.log, c.path) || strings.Contains(compared.log, c.other) {
+				t.Errorf("log %q, want it to name %s alone", compared.log, c.path)
+			}
+		})
+	}
+}
+
 func TestPullRequestChangingOtherFilesForcesNothing(t *testing.T) {
 	t.Parallel()
 	repo, merge, base := pullRequest(t, map[string]string{"a.go": changed, ".github/workflows/other.yml": changed}, nil)
@@ -199,6 +218,28 @@ func TestUnresolvableBaseFailsBeforeTheGate(t *testing.T) {
 	repo, merge, _ := pullRequest(t, map[string]string{"a.go": changed}, nil)
 	head, _ := checkoutHead(t, repo, pullRequestEvent(merge), 1)
 	wantFailure(t, run(t, "compare.sh", head, pullRequestEvent(merge)), "base")
+}
+
+func TestUndeterminableChangedPathsFail(t *testing.T) {
+	t.Parallel()
+	t.Run("base tree missing", func(t *testing.T) {
+		t.Parallel()
+		repo, merge, base := pullRequest(t, map[string]string{"a.go": changed}, nil)
+		head, _ := checkoutHead(t, repo, pullRequestEvent(merge), 2)
+		tree := git(t, head, "rev-parse", base+"^{tree}")
+		if err := os.Remove(filepath.Join(head, ".git", "objects", tree[:2], tree[2:])); err != nil {
+			t.Fatal(err)
+		}
+		wantFailure(t, run(t, "compare.sh", head, pullRequestEvent(merge)), "pull request changes")
+	})
+	t.Run("workflow of another repository", func(t *testing.T) {
+		t.Parallel()
+		repo, merge, _ := pullRequest(t, map[string]string{"a.go": changed}, nil)
+		env := pullRequestEvent(merge)
+		env["GITHUB_WORKFLOW_REF"] = "other/repo/.github/workflows/gate.yml@refs/pull/1/merge"
+		head, _ := checkoutHead(t, repo, env, 2)
+		wantFailure(t, run(t, "compare.sh", head, env), "GITHUB_WORKFLOW_REF")
+	})
 }
 
 func TestGivenRefsAreComparedAsGiven(t *testing.T) {
