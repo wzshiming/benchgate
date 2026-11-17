@@ -63,7 +63,7 @@ func (o Options) gate(ctx context.Context, sampleRun sampler) (report []byte, re
 		}
 	}
 	if entries, err := os.ReadDir(o.Out); err == nil && len(entries) > 0 {
-		return nil, false, fmt.Errorf("-out %s is not empty", o.Out)
+		return nil, false, fmt.Errorf("Options.Out %s is not empty", o.Out)
 	}
 	if err := os.MkdirAll(o.Out, 0o755); err != nil {
 		return nil, false, err

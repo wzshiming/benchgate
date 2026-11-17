@@ -395,3 +395,21 @@ func TestNilDiagnosticsAreDiscarded(t *testing.T) {
 	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Diagnostics = nil })
 	wantCode(t, o, 0)
 }
+
+func TestErrorsNameOptionsFieldsNotFlags(t *testing.T) {
+	t.Parallel()
+	t.Run("unknown group", func(t *testing.T) {
+		t.Parallel()
+		o := runGate(t, (&fake{}).run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Groups = []string{"cpu", "disk"} })
+		if want := "benchgate: Options.Groups: no group \"disk\" in the configuration\n"; o.stderr != want {
+			t.Errorf("stderr %q, want %q", o.stderr, want)
+		}
+	})
+	t.Run("output directory not empty", func(t *testing.T) {
+		t.Parallel()
+		o := runGate(t, (&fake{}).run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { writeFile(t, filepath.Join(o.Out, "report.md"), "") })
+		if want := "benchgate: Options.Out " + o.out + " is not empty\n"; o.stderr != want {
+			t.Errorf("stderr %q, want %q", o.stderr, want)
+		}
+	})
+}

@@ -131,7 +131,7 @@ func validBenchtime(s string) bool {
 func (c *Config) only(names []string) error {
 	for _, n := range names {
 		if !slices.ContainsFunc(c.Groups, func(g Group) bool { return g.Name == n }) {
-			return fmt.Errorf("-groups: no group %q in the configuration", n)
+			return fmt.Errorf("Options.Groups: no group %q in the configuration", n)
 		}
 	}
 	c.Groups = slices.DeleteFunc(c.Groups, func(g Group) bool { return !slices.Contains(names, g.Name) })
