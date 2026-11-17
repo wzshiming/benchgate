@@ -12,7 +12,7 @@ inputs:
     description: Ref or commit of this repository to gate against base.
     required: false
   measure-identical:
-    description: true or false to measure packages whose test binaries are identical whatever the configuration says; empty to measure them when a pull request changes the configuration or the calling workflow, and otherwise as the configuration says.
+    description: true or false to measure packages whose test binaries are identical whatever the configuration says; empty to leave it to the configuration, except that they are measured when no base and head are given and the pull request changes the configuration or the calling workflow.
     required: false
   go-version-file:
     description: Path of the file in the head tree that names the Go version both trees are built with.
