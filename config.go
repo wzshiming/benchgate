@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"os"
 	"regexp"
 	"slices"
@@ -65,7 +66,7 @@ func LoadConfig(path string) (Config, error) {
 
 func (c Config) validate() error {
 	switch {
-	case c.Alpha <= 0 || c.Alpha >= 1:
+	case !(c.Alpha > 0 && c.Alpha < 1): // negated so that NaN fails too
 		return fmt.Errorf("alpha: %v, want more than 0 and less than 1", c.Alpha)
 	case c.MinSamples < 1:
 		return fmt.Errorf("minSamples: %d, want at least 1", c.MinSamples)
@@ -103,6 +104,8 @@ func (g Group) validate(minSamples int) error {
 			return fmt.Errorf("thresholds[%q]: not a metric the gate judges, want one of %s", m, strings.Join(judgedMetrics, ", "))
 		case t < 0:
 			return fmt.Errorf("thresholds[%q]: %v, want at least 0", m, t)
+		case math.IsNaN(t) || math.IsInf(t, 1):
+			return fmt.Errorf("thresholds[%q]: %v, want a finite number", m, t)
 		}
 	}
 	switch {

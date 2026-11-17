@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"math"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -106,11 +107,14 @@ func TestRunRejectsAnInvalidConfigBuiltInCode(t *testing.T) {
 		{"invalid regular expression", func(c *Config) { c.Groups[0].Bench = "(" }, "groups[0].bench:"},
 		{"judged group with nine rounds", func(c *Config) { c.Groups[0].Rounds = 9 }, "groups[0].rounds:"},
 		{"negative threshold", func(c *Config) { c.Groups[0].Thresholds["sec/op"] = -0.1 }, `groups[0].thresholds["sec/op"]:`},
+		{"threshold of NaN", func(c *Config) { c.Groups[0].Thresholds["sec/op"] = math.NaN() }, `groups[0].thresholds["sec/op"]:`},
+		{"infinite threshold", func(c *Config) { c.Groups[0].Thresholds["sec/op"] = math.Inf(1) }, `groups[0].thresholds["sec/op"]:`},
 		{"metric the gate cannot judge", func(c *Config) { c.Groups[0].Thresholds = map[string]float64{"ns/op": 0.1} }, `groups[0].thresholds["ns/op"]:`},
 		{"neither thresholds nor reportOnly", func(c *Config) { c.Groups[0].Thresholds = nil }, "groups[0].thresholds:"},
 		{"thresholds in a report-only group", func(c *Config) { c.Groups[1].Thresholds = map[string]float64{"sec/op": 0.1} }, "groups[1].thresholds:"},
 		{"alpha of 0", func(c *Config) { c.Alpha = 0 }, "alpha:"},
 		{"alpha of 1", func(c *Config) { c.Alpha = 1 }, "alpha:"},
+		{"alpha of NaN", func(c *Config) { c.Alpha = math.NaN() }, "alpha:"},
 		{"no minSamples", func(c *Config) { c.MinSamples = 0 }, "minSamples:"},
 		{"judged group with fewer rounds than minSamples", func(c *Config) { c.MinSamples = 12 }, "groups[0].rounds:"},
 		{"no groups", func(c *Config) { c.Groups = nil }, "groups:"},
