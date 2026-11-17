@@ -69,17 +69,18 @@ jobs:
 
 `config` is the configuration's path in the head tree. The pull request's merge
 commit is gated against its first parent, unless `base` and `head`, refs or
-commits of the repository, are both given; other events need both.
-`measure-identical`, `true` or `false`, says whether identical test binaries are
-measured; left empty, the configuration says, but without `base` and `head` they
-are measured when the pull request changes the configuration or the calling
-workflow. Both trees are checked out under `.benchgate/` and built with the Go,
-1.21 or newer, that the head tree's `go-version-file` (default `go.mod`) names;
-the gate is built from the Action's own source. `artifact-name` defaults to
-`benchgate-<job>-<matrix index>-<run attempt>`. The Action refuses
-`pull_request_target`, which would run the pull request's code with a token that
-can write. [gate.yml](.github/workflows/gate.yml) gates this repository, on
-pushes and manual runs too.
+commits of the repository, are both given; other events need both. The Action
+builds and runs whatever given refs hold: never pass an untrusted pull request's
+refs in a workflow with secrets or a token that can write, as on `workflow_run`
+or `issue_comment`. It refuses `pull_request_target`, which would run the pull
+request's code with such a token. `measure-identical`, `true` or `false`, says
+whether identical test binaries are measured; left empty, the configuration
+says, but without `base` and `head` they are measured when the pull request
+changes the configuration or the calling workflow. Both trees, checked out under
+`.benchgate/`, are built with the Go, 1.21 or newer, named by the head tree's
+`go-version-file` (default `go.mod`), and the gate from the Action's own source.
+`artifact-name` defaults to `benchgate-<job>-<matrix index>-<run attempt>`.
+[gate.yml](.github/workflows/gate.yml) gates this repository.
 
 ## When the check is red
 
