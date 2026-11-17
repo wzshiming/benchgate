@@ -23,4 +23,8 @@ elif [[ -n $INPUT_BASE || -n $INPUT_HEAD ]]; then
 else
 	head=$GITHUB_SHA
 fi
+case $INPUT_MEASURE_IDENTICAL in
+'' | true | false) ;;
+*) fail "input measure-identical is $(printf %q "$INPUT_MEASURE_IDENTICAL"), want true, false or nothing" ;;
+esac
 printf 'head=%s\n' "$head" >>"$GITHUB_OUTPUT"

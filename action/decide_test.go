@@ -213,6 +213,27 @@ func TestConfigurationChangedOnlyOnTheBaseSideForcesNothing(t *testing.T) {
 	wantComparison(t, run(t, "compare.sh", head, pullRequestEvent(merge)), base, "")
 }
 
+func TestGivenMeasureIdenticalWins(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, event, base, head, given, path string }{
+		{"false on a pull request changing the configuration", "pull_request", "", "", "false", "test/benchgate.json"},
+		{"true on a pull request changing other files", "pull_request", "", "", "true", "a.go"},
+		{"true on given refs", "workflow_dispatch", "master", "pr", "true", "a.go"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, base := pullRequest(t, map[string]string{c.path: changed}, nil)
+			env := pullRequestEvent(merge)
+			env["GITHUB_EVENT_NAME"], env["INPUT_BASE"], env["INPUT_HEAD"], env["INPUT_MEASURE_IDENTICAL"] = c.event, c.base, c.head, c.given
+			if c.base != "" {
+				base = c.base
+			}
+			head, _ := checkoutHead(t, repo, env, 2)
+			wantComparison(t, run(t, "compare.sh", head, env), base, c.given)
+		})
+	}
+}
+
 func TestUnresolvableBaseFailsBeforeTheGate(t *testing.T) {
 	t.Parallel()
 	repo, merge, _ := pullRequest(t, map[string]string{"a.go": changed}, nil)
@@ -259,11 +280,12 @@ func TestGivenRefsAreComparedAsGiven(t *testing.T) {
 	}
 }
 
-func TestMalformedRefIsRefused(t *testing.T) {
+func TestMalformedInputIsRefused(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ name, input, value string }{
 		{"base", "INPUT_BASE", "master branch"},
 		{"head", "INPUT_HEAD", "pr\nbase=evil"},
+		{"measure-identical", "INPUT_MEASURE_IDENTICAL", "yes"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
