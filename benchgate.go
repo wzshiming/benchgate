@@ -2,6 +2,7 @@
 package benchgate
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -23,7 +24,7 @@ type Options struct {
 	Out                  string    // output directory, new or empty
 	MeasureIdentical     *bool     // overrides Config.MeasureIdentical unless nil
 	Groups               []string  // names of the only groups to run, empty for all
-	Diagnostics          io.Writer // gets why a base failed and how many malformed base sample lines were left out
+	Diagnostics          io.Writer // gets why a base failed and how many malformed base sample lines were left out; nil discards them
 	Reproduce            string    // the report's Reproduce section, verbatim; empty leaves the section out
 }
 
@@ -67,7 +68,7 @@ func (o Options) gate(ctx context.Context, sampleRun sampler) (report []byte, re
 	if err := os.MkdirAll(o.Out, 0o755); err != nil {
 		return nil, false, err
 	}
-	res, err := gate(ctx, sampleRun, cfg, o.Base, o.Head, o.Out, o.Diagnostics)
+	res, err := gate(ctx, sampleRun, cfg, o.Base, o.Head, o.Out, cmp.Or(o.Diagnostics, io.Discard))
 	if err != nil {
 		return nil, false, err
 	}

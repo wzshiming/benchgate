@@ -385,3 +385,13 @@ func TestRunRejectsMissingOptions(t *testing.T) {
 		})
 	}
 }
+
+func TestNilDiagnosticsAreDiscarded(t *testing.T) {
+	t.Parallel()
+	// Package q's failing base and the malformed base line each give a diagnostic.
+	states := []sample.Status{{Package: "p", State: sample.Measured}, {Package: "q", State: sample.BaseFailed, Reason: "run in round 1 failed: exit status 1"}}
+	cpu := canned{base: clean.base + "BenchmarkA-8\tprinted by the benchmark\n", head: clean.head, states: states}
+	f := &fake{passes: []map[string]canned{{"cpu": cpu}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Diagnostics = nil })
+	wantCode(t, o, 0)
+}
