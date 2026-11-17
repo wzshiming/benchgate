@@ -35,6 +35,13 @@ func Run(ctx context.Context, o Options) (report []byte, regressed bool, err err
 // gate is Run sampling through sampleRun.
 func (o Options) gate(ctx context.Context, sampleRun sampler) (report []byte, regressed bool, err error) {
 	cfg := o.Config
+	for _, g := range cfg.Groups {
+		for _, p := range g.Packages {
+			if !filepath.IsLocal(p) {
+				return nil, false, fmt.Errorf("group %q, package %q: want a relative path inside the trees", g.Name, p)
+			}
+		}
+	}
 	if o.MeasureIdentical != nil {
 		cfg.MeasureIdentical = *o.MeasureIdentical
 	}

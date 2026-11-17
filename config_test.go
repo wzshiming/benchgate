@@ -2,7 +2,10 @@ package benchgate
 
 import (
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -93,5 +96,47 @@ func TestDataAfterTheConfigurationExitsTwo(t *testing.T) {
 			t.Errorf("with %q after the configuration: exit code %d, sampled %d times, stderr %q; want 2, no sampling and the data named",
 				trailing, o.code, len(f.requests), o.stderr)
 		}
+	}
+}
+
+func TestPackagesMustStayInsideTheTrees(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name, pkg string
+		accepted  bool
+	}{
+		{"absolute", filepath.Join(t.TempDir(), "p"), false},
+		{"parent", "..", false},
+		{"leaving through the parent", "../p", false},
+		{"leaving below a level", "p/../../q", false},
+		{"empty", "", false},
+		{"root", ".", true},
+		{"nested", "p/q/r", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: []map[string]canned{{}}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), edited(t, func(_ map[string]any, g []map[string]any) { g[0]["packages"] = []any{"p", c.pkg} }))
+			if c.accepted {
+				wantCode(t, o, 0)
+				if len(f.requests) != 1 || !slices.Equal(f.requests[0].Groups[0].Packages, []string{"p", c.pkg}) {
+					t.Errorf("requests %+v, want group cpu sampled with packages p and %q", f.requests, c.pkg)
+				}
+				return
+			}
+			wantCode(t, o, 2)
+			if want := fmt.Sprintf("group %q, package %q", "cpu", c.pkg); !strings.Contains(o.stderr, want) {
+				t.Errorf("stderr %q does not name %s", o.stderr, want)
+			}
+			if len(f.requests) != 0 {
+				t.Errorf("sampled %d times, want no build and no sampling", len(f.requests))
+			}
+			filepath.WalkDir(o.out, func(path string, d fs.DirEntry, err error) error {
+				if err == nil && !d.IsDir() {
+					t.Errorf("output directory holds %s, want no samples", path)
+				}
+				return nil
+			})
+		})
 	}
 }
