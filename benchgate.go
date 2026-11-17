@@ -41,6 +41,9 @@ func (o Options) gate(ctx context.Context, sampleRun sampler) (report []byte, re
 			return nil, false, fmt.Errorf("missing Options.%s", f.name)
 		}
 	}
+	if err := o.Config.validate(); err != nil {
+		return nil, false, fmt.Errorf("Options.Config: %w", err)
+	}
 	cfg := o.Config
 	for _, g := range cfg.Groups {
 		for _, p := range g.Packages {

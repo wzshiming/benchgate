@@ -85,6 +85,54 @@ func TestConfigErrorsExitTwoNamingTheField(t *testing.T) {
 	}
 }
 
+// codeConfig is validConfig built in code.
+func codeConfig() Config {
+	return Config{Alpha: 0.05, MinSamples: 10, Groups: []Group{
+		{Name: "cpu", Packages: []string{"p"}, Bench: ".", Rounds: 10, Thresholds: map[string]float64{"sec/op": 0.1}},
+		{Name: "io", Packages: []string{"r"}, Bench: ".", Rounds: 3, ReportOnly: true},
+	}}
+}
+
+func TestRunRejectsAnInvalidConfigBuiltInCode(t *testing.T) {
+	t.Parallel()
+	f := &fake{passes: []map[string]canned{{}}}
+	wantCode(t, runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Config = codeConfig() }), 0)
+
+	for _, c := range []struct {
+		name  string
+		edit  func(c *Config)
+		names string // what the error says after naming Options.Config
+	}{
+		{"invalid regular expression", func(c *Config) { c.Groups[0].Bench = "(" }, "groups[0].bench:"},
+		{"judged group with nine rounds", func(c *Config) { c.Groups[0].Rounds = 9 }, "groups[0].rounds:"},
+		{"negative threshold", func(c *Config) { c.Groups[0].Thresholds["sec/op"] = -0.1 }, `groups[0].thresholds["sec/op"]:`},
+		{"metric the gate cannot judge", func(c *Config) { c.Groups[0].Thresholds = map[string]float64{"ns/op": 0.1} }, `groups[0].thresholds["ns/op"]:`},
+		{"neither thresholds nor reportOnly", func(c *Config) { c.Groups[0].Thresholds = nil }, "groups[0].thresholds:"},
+		{"thresholds in a report-only group", func(c *Config) { c.Groups[1].Thresholds = map[string]float64{"sec/op": 0.1} }, "groups[1].thresholds:"},
+		{"alpha of 0", func(c *Config) { c.Alpha = 0 }, "alpha:"},
+		{"alpha of 1", func(c *Config) { c.Alpha = 1 }, "alpha:"},
+		{"no minSamples", func(c *Config) { c.MinSamples = 0 }, "minSamples:"},
+		{"judged group with fewer rounds than minSamples", func(c *Config) { c.MinSamples = 12 }, "groups[0].rounds:"},
+		{"no groups", func(c *Config) { c.Groups = nil }, "groups:"},
+		{"group without packages", func(c *Config) { c.Groups[0].Packages = nil }, "groups[0].packages:"},
+		{"empty benchmark expression", func(c *Config) { c.Groups[1].Bench = "" }, "groups[1].bench:"},
+		{"benchtime neither a duration nor a count", func(c *Config) { c.Groups[0].Benchtime = "soon" }, "groups[0].benchtime:"},
+		{"report-only group without rounds", func(c *Config) { c.Groups[1].Rounds = 0 }, "groups[1].rounds:"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := codeConfig()
+			c.edit(&cfg)
+			f := &fake{passes: []map[string]canned{{}}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Config = cfg })
+			if want := "benchgate: Options.Config: " + c.names; !strings.HasPrefix(o.stderr, want) {
+				t.Errorf("stderr %q, want it to start %q", o.stderr, want)
+			}
+			wantNothingDone(t, f, o)
+		})
+	}
+}
+
 func TestDataAfterTheConfigurationExitsTwo(t *testing.T) {
 	t.Parallel()
 	for _, trailing := range []string{" this is not JSON", "\n{}", "}"} {
