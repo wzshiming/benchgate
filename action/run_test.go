@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -124,5 +125,23 @@ func TestGateRunsOnTheTreesLabelledByTheirCommits(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("the gate was given %+v, want %+v", got, want)
+	}
+}
+
+func TestResultsHoldTheReportTheSamplesAndTheGatesErrors(t *testing.T) {
+	t.Parallel()
+	env, _, _ := gating(t, 1)
+	s := run(t, "run.sh", t.TempDir(), env)
+	for name, want := range map[string]string{
+		"out/report.md":        standInReport,
+		"out/first/g.base.txt": standInSample,
+		"stderr.txt":           standInStderr,
+	} {
+		if got, err := os.ReadFile(filepath.Join(env["RESULTS"], name)); string(got) != want {
+			t.Errorf("RESULTS/%s holds %q (%v), want %q\n%s", name, got, err, want, s.log)
+		}
+	}
+	if !strings.Contains(s.log, standInStderr) {
+		t.Errorf("log %q, want the gate's errors %q in it", s.log, standInStderr)
 	}
 }
