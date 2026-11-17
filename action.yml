@@ -1,0 +1,95 @@
+name: benchgate
+description: Benchmark the head of a pull request, or a given ref, against its base on the same runner and fail on a confirmed regression.
+
+inputs:
+  config:
+    description: Path of the gate's configuration file in the head tree.
+    required: true
+  base:
+    description: Ref or commit of this repository to compare against; give both base and head, or on a pull request neither to compare its merge commit with its first parent.
+    required: false
+  head:
+    description: Ref or commit of this repository to gate against base.
+    required: false
+  measure-identical:
+    description: true or false to measure packages whose test binaries are identical whatever the configuration says; empty to measure them when a pull request changes the configuration or the calling workflow, and otherwise as the configuration says.
+    required: false
+  go-version-file:
+    description: Path of the file in the head tree that names the Go version both trees are built with.
+    required: false
+    default: go.mod
+  artifact-name:
+    description: Name of the artifact holding the report, the raw samples and the gate's standard error.
+    required: false
+    default: benchgate-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_attempt }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the event
+      id: event
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_HEAD: ${{ inputs.head }}
+        INPUT_MEASURE_IDENTICAL: ${{ inputs.measure-identical }}
+      run: bash "$GITHUB_ACTION_PATH/action/event.sh"
+
+    # Both trees go under .benchgate, out of the way of any checkout of the caller's.
+    - name: Check out the head
+      uses: actions/checkout@v5
+      with:
+        ref: ${{ steps.event.outputs.head }}
+        path: .benchgate/head
+        # compare.sh needs a merge commit's first parent.
+        fetch-depth: 2
+        persist-credentials: false
+
+    - name: Find the base
+      id: compare
+      shell: bash
+      working-directory: ${{ github.workspace }}/.benchgate/head
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_MEASURE_IDENTICAL: ${{ inputs.measure-identical }}
+      run: bash "$GITHUB_ACTION_PATH/action/compare.sh"
+
+    - name: Check out the base
+      uses: actions/checkout@v5
+      with:
+        ref: ${{ steps.compare.outputs.base }}
+        path: .benchgate/base
+        persist-credentials: false
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.workspace }}/.benchgate/head/${{ inputs.go-version-file }}
+        cache: false
+
+    # The Go set up for the trees may be older than the gate's go.mod asks, so this build may switch toolchains.
+    - name: Build the gate
+      shell: bash
+      env:
+        BENCHGATE: ${{ runner.temp }}/benchgate
+      run: GOTOOLCHAIN=auto go -C "$GITHUB_ACTION_PATH" build -o "$BENCHGATE" ./cmd/benchgate
+
+    - name: Run the gate
+      id: gate
+      shell: bash
+      env:
+        BENCHGATE: ${{ runner.temp }}/benchgate
+        BASE_TREE: ${{ github.workspace }}/.benchgate/base
+        HEAD_TREE: ${{ github.workspace }}/.benchgate/head
+        INPUT_CONFIG: ${{ inputs.config }}
+        MEASURE_IDENTICAL: ${{ steps.compare.outputs.measure-identical }}
+        RESULTS: ${{ runner.temp }}/benchgate-results
+      run: bash "$GITHUB_ACTION_PATH/action/run.sh"
+
+    - name: Upload the report and the samples
+      if: ${{ !cancelled() && steps.gate.outcome != 'skipped' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/benchgate-results
