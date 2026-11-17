@@ -362,6 +362,39 @@ func TestGroupSubsetLeavesTheCallersConfigAlone(t *testing.T) {
 	}
 }
 
+func TestGroupSubsetLimitsTheRequestToTheNamedGroups(t *testing.T) {
+	t.Parallel()
+	f := &fake{passes: []map[string]canned{{}}}
+	wantCode(t, runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Groups = []string{"io"} }), 0)
+	if len(f.requests) != 1 || len(f.requests[0].Groups) != 1 || f.requests[0].Groups[0].Name != "io" {
+		t.Errorf("requests %+v, want one of group io alone", f.requests)
+	}
+}
+
+func TestMeasureIdenticalOverrideBeatsTheConfiguration(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ config, override bool }{{false, true}, {true, false}} {
+		f := &fake{passes: []map[string]canned{{}}}
+		wantCode(t, runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) {
+			o.Config.MeasureIdentical, o.MeasureIdentical = c.config, new(c.override)
+		}), 0)
+		if got := f.requests[0].MeasureIdentical; got != c.override {
+			t.Errorf("configuration %v, override %v: the request measures identical binaries %v, want %v", c.config, c.override, got, c.override)
+		}
+	}
+}
+
+func TestNilMeasureIdenticalKeepsTheConfigurationsValue(t *testing.T) {
+	t.Parallel()
+	for _, config := range []bool{false, true} {
+		f := &fake{passes: []map[string]canned{{}}}
+		wantCode(t, runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Config.MeasureIdentical = config }), 0)
+		if got := f.requests[0].MeasureIdentical; got != config {
+			t.Errorf("configuration %v, no override: the request measures identical binaries %v, want %v", config, got, config)
+		}
+	}
+}
+
 func TestRunRejectsMissingOptions(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
