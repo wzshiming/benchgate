@@ -115,7 +115,7 @@ var aa = []bench{
 }
 
 // write writes the base and the head side of benches to sample files and returns their paths.
-func write(t *testing.T, benches []bench) (base, head string) {
+func write(t testing.TB, benches []bench) (base, head string) {
 	t.Helper()
 	dir := t.TempDir()
 	base, head = filepath.Join(dir, "base.txt"), filepath.Join(dir, "head.txt")
@@ -342,7 +342,17 @@ func TestMalformedBaseLinesAreLeftOut(t *testing.T) {
 	}
 }
 
-func writeFile(t *testing.T, path, content string) {
+func BenchmarkCompare(b *testing.B) {
+	base, head := write(b, ab)
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := verdict.Compare(base, head, gate); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func writeFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
