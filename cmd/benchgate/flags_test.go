@@ -12,14 +12,18 @@ import (
 	"github.com/wzshiming/benchgate"
 )
 
-// fake is a gate that records the options of each run and finds nothing.
+// fake is a gate that records the options of each run and finds nothing, so its report holds just their Reproduce section.
 type fake struct {
 	requests []benchgate.Options
 }
 
 func (f *fake) run(_ context.Context, o benchgate.Options) ([]byte, bool, error) {
 	f.requests = append(f.requests, o)
-	return nil, false, nil
+	report := "# Benchmark gate\n\n"
+	if o.Reproduce != "" {
+		report += "## Reproduce\n\n" + o.Reproduce
+	}
+	return []byte(report), false, nil
 }
 
 // fakeConfig writes a configuration whose group cpu judges packages p and q at 10% and whose group io

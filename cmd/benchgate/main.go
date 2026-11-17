@@ -109,5 +109,6 @@ func (o options) gate(ctx context.Context, benchgateRun gateFunc, stderr io.Writ
 	return benchgateRun(ctx, benchgate.Options{
 		Base: o.base, Head: o.head, BaseLabel: o.baseLabel, HeadLabel: o.headLabel,
 		Config: cfg, Out: o.out, MeasureIdentical: o.measureIdentical, Groups: groups, Diagnostics: stderr,
+		Reproduce: o.reproduce(mainVersion()),
 	})
 }
