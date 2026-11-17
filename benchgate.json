@@ -1,0 +1,15 @@
+{
+  "alpha": 0.05,
+  "minSamples": 10,
+  "measureIdentical": false,
+  "groups": [
+    {
+      "name": "verdict",
+      "packages": ["verdict"],
+      "bench": "^BenchmarkCompare$",
+      "benchtime": "300ms",
+      "rounds": 10,
+      "thresholds": {"sec/op": 0.1, "B/op": 0.1, "allocs/op": 0.1}
+    }
+  ]
+}

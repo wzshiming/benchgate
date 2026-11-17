@@ -1,0 +1,50 @@
+name: Benchmark gate
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Ref or commit to compare against
+        required: true
+        default: master
+      head:
+        description: Ref or commit gated against the base
+        required: true
+        default: master
+      measure-identical:
+        description: Measure packages whose test binaries are identical too
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# A pull request's newer run cancels its older one; every other run is a group of its own.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      # The Action runs from this checkout, so that a pull request is gated by the Action it changes.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./
+        with:
+          config: benchgate.json
+          # A push compares master before and after it; a pull request gives no refs, so its merge commit is compared with the first parent.
+          base: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
+          head: ${{ github.event_name == 'push' && github.sha || inputs.head }}
+          measure-identical: ${{ inputs.measure-identical }}
