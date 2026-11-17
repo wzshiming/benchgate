@@ -15,7 +15,7 @@ import (
 var gate = verdict.Policy{
 	Thresholds: map[string]float64{"sec/op": 0.10, "B/op": 0.10, "allocs/op": 0.10},
 	Alpha:      0.05,
-	MinSamples: 10,
+	MinSamples: "10",
 }
 
 // metric is a unit's values on a benchmark's result lines, one per line.
