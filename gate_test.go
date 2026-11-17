@@ -2,8 +2,10 @@ package benchgate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -113,6 +115,17 @@ func wantCode(t *testing.T, o outcome, want int) {
 	t.Helper()
 	if o.code != want {
 		t.Fatalf("exit code %d, want %d\nstderr:\n%s\nreport:\n%s", o.code, want, o.stderr, o.report)
+	}
+}
+
+// wantNothingDone fails t unless run o sampled nothing through f and left no output directory.
+func wantNothingDone(t *testing.T, f *fake, o outcome) {
+	t.Helper()
+	if len(f.requests) != 0 {
+		t.Errorf("sampled %d times, want no build and no sampling", len(f.requests))
+	}
+	if _, err := os.Stat(o.out); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("output directory %s exists (%v), want nothing written", o.out, err)
 	}
 }
 
@@ -340,11 +353,35 @@ func TestGroupSubsetLeavesTheCallersConfigAlone(t *testing.T) {
 	}
 	want := slices.Clone(cfg.Groups)
 	f := &fake{passes: []map[string]canned{{}}}
-	o := Options{Base: t.TempDir(), Head: t.TempDir(), Config: cfg, Out: filepath.Join(t.TempDir(), "out"), Groups: []string{"io"}, Diagnostics: io.Discard}
+	o := Options{Base: t.TempDir(), Head: t.TempDir(), BaseLabel: "base-commit", HeadLabel: "head-commit", Config: cfg, Out: filepath.Join(t.TempDir(), "out"), Groups: []string{"io"}, Diagnostics: io.Discard}
 	if _, _, err := o.gate(t.Context(), f.run); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cfg.Groups, want) {
 		t.Errorf("groups after a run of group io alone %+v, want %+v", cfg.Groups, want)
+	}
+}
+
+func TestRunRejectsMissingOptions(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		field string
+		clear func(*Options)
+	}{
+		{"Base", func(o *Options) { o.Base = "" }},
+		{"Head", func(o *Options) { o.Head = "" }},
+		{"BaseLabel", func(o *Options) { o.BaseLabel = "" }},
+		{"HeadLabel", func(o *Options) { o.HeadLabel = "" }},
+		{"Out", func(o *Options) { o.Out = "" }},
+	} {
+		t.Run(c.field, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: []map[string]canned{{}}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), c.clear)
+			if want := "benchgate: missing Options." + c.field + "\n"; o.stderr != want {
+				t.Errorf("stderr %q, want %q", o.stderr, want)
+			}
+			wantNothingDone(t, f, o)
+		})
 	}
 }

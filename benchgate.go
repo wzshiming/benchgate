@@ -34,6 +34,13 @@ func Run(ctx context.Context, o Options) (report []byte, regressed bool, err err
 
 // gate is Run sampling through sampleRun.
 func (o Options) gate(ctx context.Context, sampleRun sampler) (report []byte, regressed bool, err error) {
+	for _, f := range []struct{ name, value string }{
+		{"Base", o.Base}, {"Head", o.Head}, {"BaseLabel", o.BaseLabel}, {"HeadLabel", o.HeadLabel}, {"Out", o.Out},
+	} {
+		if f.value == "" {
+			return nil, false, fmt.Errorf("missing Options.%s", f.name)
+		}
+	}
 	cfg := o.Config
 	for _, g := range cfg.Groups {
 		for _, p := range g.Packages {
