@@ -24,6 +24,7 @@ type Options struct {
 	MeasureIdentical     *bool     // overrides Config.MeasureIdentical unless nil
 	Groups               []string  // names of the only groups to run, empty for all
 	Diagnostics          io.Writer // gets why a base failed and how many malformed base sample lines were left out
+	Reproduce            string    // the report's Reproduce section, verbatim; empty leaves the section out
 }
 
 // Run runs the gate, warning on o.Diagnostics, and renders its report; regressed tells whether a regression is confirmed.

@@ -35,6 +35,9 @@ func render(o Options, cfg Config, res result) []byte {
 	comparison(&b, o, cfg, res)
 	notMeasured(&b, res)
 	loadPerRound(&b, res)
+	if o.Reproduce != "" {
+		fmt.Fprintf(&b, "## Reproduce\n\n%s", o.Reproduce)
+	}
 	return []byte(b.String())
 }
 

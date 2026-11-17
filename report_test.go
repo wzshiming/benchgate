@@ -52,7 +52,7 @@ type fullRun struct {
 	outcome
 }
 
-func runFull(t *testing.T) fullRun {
+func runFull(t *testing.T, edits ...func(*Options)) fullRun {
 	t.Helper()
 	cpu := canned{
 		base: samples(bench{"BenchmarkA-8", 100, 64, 1}, bench{"BenchmarkC-8", 100, 64, 1}, bench{"BenchmarkR-8", 100, 0, 0}, bench{"BenchmarkZ-8", 100, 0, 0}),
@@ -86,7 +86,8 @@ func runFull(t *testing.T) fullRun {
 	r := fullRun{base: t.TempDir(), head: t.TempDir()}
 	r.config = filepath.Join(r.head, "benchgate.json")
 	writeFile(t, r.config, fullConfig)
-	r.outcome = runGate(t, f.run, r.base, r.head, r.config, func(o *Options) { o.BaseLabel, o.HeadLabel = "abc1234", "def5678 (merge)" })
+	labels := func(o *Options) { o.BaseLabel, o.HeadLabel = "abc1234", "def5678 (merge)" }
+	r.outcome = runGate(t, f.run, r.base, r.head, r.config, append([]func(*Options){labels}, edits...)...)
 	return r
 }
 
@@ -289,6 +290,22 @@ func TestConclusionLine(t *testing.T) {
 				t.Errorf("report starts %q, want the title and %q", lines, c.want)
 			}
 		})
+	}
+}
+
+func TestReproduceTextEndsTheReportVerbatim(t *testing.T) {
+	t.Parallel()
+	const text = "Check out `<base>` and `<head>`, then run:\n\n```sh\nmake gate BASE=<base> HEAD=<head> # 100% | %s\n```\n"
+	r := runFull(t, func(o *Options) { o.Reproduce = text })
+	if want := "\n## Reproduce\n\n" + text; !strings.HasSuffix(r.report, want) {
+		t.Errorf("report ends %q, want %q", r.report[max(0, len(r.report)-len(want)):], want)
+	}
+}
+
+func TestReportWithoutReproduceTextHasNoReproduceSection(t *testing.T) {
+	t.Parallel()
+	if r := runFull(t); strings.Contains(r.report, "## Reproduce") {
+		t.Errorf("report without a reproduce text has a Reproduce section:\n%s", r.report)
 	}
 }
 
