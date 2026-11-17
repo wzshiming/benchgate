@@ -7,7 +7,8 @@ head=$(git -C "$HEAD_TREE" rev-parse HEAD)
 mkdir -p "$RESULTS"
 code=0
 "$BENCHGATE" -base "$BASE_TREE" -head "$HEAD_TREE" -base-label "$base" -head-label "$head" \
-	-config "$HEAD_TREE/$INPUT_CONFIG" -out "$RESULTS/out" 2>"$RESULTS/stderr.txt" || code=$?
+	-config "$HEAD_TREE/$INPUT_CONFIG" -out "$RESULTS/out" ${MEASURE_IDENTICAL:+"-measure-identical=$MEASURE_IDENTICAL"} \
+	2>"$RESULTS/stderr.txt" || code=$?
 cat "$RESULTS/stderr.txt" >&2
 if ((code <= 1)); then
 	cat "$RESULTS/out/report.md" >>"$GITHUB_STEP_SUMMARY"

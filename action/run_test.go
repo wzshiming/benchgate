@@ -168,3 +168,30 @@ func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
 		})
 	}
 }
+
+func TestStepsInTheActionsOrderPassTheirDecisionsToTheGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, path, given, want string }{
+		{"pull request changing the configuration", "test/benchgate.json", "", "true"},
+		{"pull request changing other files", "a.go", "", ""},
+		{"measure-identical given false", "test/benchgate.json", "false", "false"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, base := pullRequest(t, map[string]string{c.path: changed}, nil)
+			env := pullRequestEvent(merge)
+			env["INPUT_MEASURE_IDENTICAL"] = c.given
+			head, _ := checkoutHead(t, repo, env, 2)
+			compared := run(t, "compare.sh", head, env)
+			if compared.code != 0 {
+				t.Fatalf("compare.sh exited %d\n%s", compared.code, compared.log)
+			}
+			gateStep(t, env, 1, checkout(t, repo, compared.outputs["base"], 1), head)
+			env["MEASURE_IDENTICAL"] = compared.outputs["measure-identical"]
+			gated := run(t, "run.sh", t.TempDir(), env)
+			if got := recorded(t, gated, env); gated.code != 1 || got.BaseLabel != base || got.HeadLabel != merge || got.MeasureIdentical != c.want {
+				t.Errorf("run.sh exited %d after giving the gate %+v, want 1 after base-label %s, head-label %s and measure-identical %q", gated.code, got, base, merge, c.want)
+			}
+		})
+	}
+}
