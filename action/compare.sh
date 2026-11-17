@@ -24,7 +24,7 @@ else
 		else
 			printf 'Only %q can force measurement: the calling workflow %s/%s is in another repository, which the pull request cannot change.\n' "$INPUT_CONFIG" "$repository" "$workflow"
 		fi
-		changed=$(git diff-tree -r --name-only "$base" HEAD -- "${paths[@]}") ||
+		changed=$(git --literal-pathspecs diff-tree -r --name-only "$base" HEAD -- "${paths[@]}") ||
 			fail "cannot tell whether the pull request changes$(printf ' %q' "${paths[@]}")"
 		if [[ -n $changed ]]; then
 			measure=true

@@ -226,6 +226,24 @@ func TestConfigurationChangedOnlyOnTheBaseSideForcesNothing(t *testing.T) {
 	wantComparison(t, run(t, "compare.sh", head, pullRequestEvent(merge)), base, "")
 }
 
+func TestPathspecCharactersSelectOnlyTheFileOfThatName(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, config, workflow, changed, want string }{
+		{"glob in the configuration, another file changed", "test/*.json", ".github/workflows/gate.yml", "test/benchgate.json", ""},
+		{"magic in the configuration, that file changed", ":(exclude)test/benchgate.json", ".github/workflows/gate.yml", ":(exclude)test/benchgate.json", "true"},
+		{"glob in the calling workflow, another workflow changed", "test/benchgate.json", ".github/workflows/*.yml", ".github/workflows/gate.yml", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, base := pullRequest(t, map[string]string{c.changed: changed}, nil)
+			env := pullRequestEvent(merge)
+			env["INPUT_CONFIG"], env["GITHUB_WORKFLOW_REF"] = c.config, "owner/repo/"+c.workflow+"@refs/pull/1/merge"
+			head, _ := checkoutHead(t, repo, env, 2)
+			wantComparison(t, run(t, "compare.sh", head, env), base, c.want)
+		})
+	}
+}
+
 func TestGivenMeasureIdenticalWins(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ name, event, base, head, given, path string }{
