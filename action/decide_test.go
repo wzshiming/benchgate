@@ -201,6 +201,39 @@ func TestUnresolvableBaseFailsBeforeTheGate(t *testing.T) {
 	wantFailure(t, run(t, "compare.sh", head, pullRequestEvent(merge)), "base")
 }
 
+func TestGivenRefsAreComparedAsGiven(t *testing.T) {
+	t.Parallel()
+	for _, event := range []string{"workflow_dispatch", "pull_request"} {
+		t.Run(event, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, _ := pullRequest(t, map[string]string{"test/benchgate.json": changed}, nil)
+			env := pullRequestEvent(merge)
+			env["GITHUB_EVENT_NAME"], env["INPUT_BASE"], env["INPUT_HEAD"] = event, "master", "pr"
+			head, accepted := checkoutHead(t, repo, env, 2)
+			if accepted.outputs["head"] != "pr" {
+				t.Errorf("event.sh named the head %s, want pr", accepted.outputs["head"])
+			}
+			wantComparison(t, run(t, "compare.sh", head, env), "master", "")
+		})
+	}
+}
+
+func TestMalformedRefIsRefused(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, input, value string }{
+		{"base", "INPUT_BASE", "master branch"},
+		{"head", "INPUT_HEAD", "pr\nbase=evil"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			env := pullRequestEvent(fakeMerge)
+			env["GITHUB_EVENT_NAME"], env["INPUT_BASE"], env["INPUT_HEAD"] = "workflow_dispatch", "master", "pr"
+			env[c.input] = c.value
+			wantFailure(t, run(t, "event.sh", t.TempDir(), env), "input "+c.name)
+		})
+	}
+}
+
 func TestPullRequestTargetIsRefused(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct{ name, base, head string }{

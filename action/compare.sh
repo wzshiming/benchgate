@@ -7,6 +7,10 @@ fail() {
 	exit 1
 }
 
-base=$(git rev-parse --verify --quiet 'HEAD^1^{commit}') ||
-	fail "cannot resolve the base: the head checkout lacks the first parent of the merge commit"
+if [[ -n $INPUT_BASE ]]; then
+	base=$INPUT_BASE
+else
+	base=$(git rev-parse --verify --quiet 'HEAD^1^{commit}') ||
+		fail "cannot resolve the base: the head checkout lacks the first parent of the merge commit"
+fi
 printf 'base=%s\nmeasure-identical=\n' "$base" >>"$GITHUB_OUTPUT"
