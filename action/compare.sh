@@ -14,12 +14,18 @@ else
 	base=$(git rev-parse --verify --quiet 'HEAD^1^{commit}') ||
 		fail "cannot resolve the base: the head checkout lacks the first parent of the merge commit"
 	if [[ -z $measure ]]; then
-		workflow=${GITHUB_WORKFLOW_REF#"$GITHUB_REPOSITORY"/}
-		workflow=${workflow%@*}
-		[[ $workflow == .github/workflows/* ]] ||
-			fail "cannot tell the calling workflow of $GITHUB_REPOSITORY from GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
-		changed=$(git diff-tree -r --name-only "$base" HEAD -- "$INPUT_CONFIG" "$workflow") ||
-			fail "cannot tell whether the pull request changes $(printf %q "$INPUT_CONFIG") or $workflow"
+		workflow_ref='^([^/]+/[^/]+)/(\.github/workflows/.+)@'
+		[[ $GITHUB_WORKFLOW_REF =~ $workflow_ref ]] ||
+			fail "cannot tell the calling workflow from GITHUB_WORKFLOW_REF $GITHUB_WORKFLOW_REF"
+		repository=${BASH_REMATCH[1]} workflow=${BASH_REMATCH[2]}
+		paths=("$INPUT_CONFIG")
+		if [[ $repository == "$GITHUB_REPOSITORY" ]]; then
+			paths+=("$workflow")
+		else
+			printf 'Only %q can force measurement: the calling workflow %s/%s is in another repository, which the pull request cannot change.\n' "$INPUT_CONFIG" "$repository" "$workflow"
+		fi
+		changed=$(git diff-tree -r --name-only "$base" HEAD -- "${paths[@]}") ||
+			fail "cannot tell whether the pull request changes$(printf ' %q' "${paths[@]}")"
 		if [[ -n $changed ]]; then
 			measure=true
 			printf 'Measuring identical test binaries too, because the pull request changes:\n%s\n' "$changed"

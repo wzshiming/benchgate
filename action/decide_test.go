@@ -253,14 +253,41 @@ func TestUndeterminableChangedPathsFail(t *testing.T) {
 		}
 		wantFailure(t, run(t, "compare.sh", head, pullRequestEvent(merge)), "pull request changes")
 	})
-	t.Run("workflow of another repository", func(t *testing.T) {
-		t.Parallel()
-		repo, merge, _ := pullRequest(t, map[string]string{"a.go": changed}, nil)
-		env := pullRequestEvent(merge)
-		env["GITHUB_WORKFLOW_REF"] = "other/repo/.github/workflows/gate.yml@refs/pull/1/merge"
-		head, _ := checkoutHead(t, repo, env, 2)
-		wantFailure(t, run(t, "compare.sh", head, env), "GITHUB_WORKFLOW_REF")
-	})
+	for _, c := range []struct{ name, ref string }{
+		{"workflow outside .github/workflows", "owner/repo/gate.yml@refs/pull/1/merge"},
+		{"workflow without a repository", ".github/workflows/gate.yml@refs/pull/1/merge"},
+		{"empty GITHUB_WORKFLOW_REF", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, _ := pullRequest(t, map[string]string{"a.go": changed}, nil)
+			env := pullRequestEvent(merge)
+			env["GITHUB_WORKFLOW_REF"] = c.ref
+			head, _ := checkoutHead(t, repo, env, 2)
+			wantFailure(t, run(t, "compare.sh", head, env), "GITHUB_WORKFLOW_REF")
+		})
+	}
+}
+
+func TestOnlyTheConfigurationCountsForAWorkflowOfAnotherRepository(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ name, path, want string }{
+		{"pull request changing a workflow of the same name", ".github/workflows/gate.yml", ""},
+		{"pull request changing the configuration", "test/benchgate.json", "true"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			repo, merge, base := pullRequest(t, map[string]string{c.path: changed}, nil)
+			env := pullRequestEvent(merge)
+			env["GITHUB_WORKFLOW_REF"] = "other/repo/.github/workflows/gate.yml@refs/heads/master"
+			head, _ := checkoutHead(t, repo, env, 2)
+			compared := run(t, "compare.sh", head, env)
+			wantComparison(t, compared, base, c.want)
+			if !strings.Contains(compared.log, "Only test/benchgate.json can force measurement") || !strings.Contains(compared.log, "other/repo/.github/workflows/gate.yml") {
+				t.Errorf("log %q, want it to say that only test/benchgate.json can force measurement and name the other repository's workflow", compared.log)
+			}
+		})
+	}
 }
 
 func TestGivenRefsAreComparedAsGiven(t *testing.T) {
