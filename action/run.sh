@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run after both checkouts and the gate's build: gate the head tree against the base tree, keep its output and errors in RESULTS, set the step's outputs, summarize and exit as it did.
+# Run after both checkouts and the gate's build: gate the head tree against the base tree, keep its output and errors in RESULTS, set the step's outputs, annotate a failure, summarize and exit as it did.
 set -euo pipefail
 
 base=$(git -C "$BASE_TREE" rev-parse HEAD)
@@ -13,8 +13,16 @@ cat "$RESULTS/stderr.txt" >&2
 report=$RESULTS/out/report.md
 case $code in
 0) conclusion=pass ;;
-1) conclusion=regression ;;
-*) conclusion=error report= ;;
+1)
+	conclusion=regression
+	# The report's first line is its conclusion: fixed words and a count, nothing from the trees.
+	title=$(head -n 1 "$report")
+	printf '::error::%s\n' "${title#'# '}"
+	;;
+*)
+	conclusion=error report=
+	printf '::error::Benchmark gate: FAIL, nothing to conclude (exit %d)\n' "$code"
+	;;
 esac
 printf 'conclusion=%s\nreport=%s\n' "$conclusion" "$report" >>"$GITHUB_OUTPUT"
 if ((code <= 1)); then
