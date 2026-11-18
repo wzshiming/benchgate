@@ -205,7 +205,7 @@ func wantCode(t *testing.T, o outcome, want int) {
 	}
 }
 
-// section is the part of report under heading, up to the next heading of its level or above.
+// section is the part of report under heading, up to the next heading of its level or above or a details tag.
 func section(t *testing.T, report, heading string) string {
 	t.Helper()
 	_, rest, ok := strings.Cut(report, "\n"+heading+"\n")
@@ -216,6 +216,9 @@ func section(t *testing.T, report, heading string) string {
 	offset := 0
 	for line := range strings.Lines(rest) {
 		if n := len(line) - len(strings.TrimLeft(line, "#")); n > 0 && n <= level && strings.HasPrefix(line[n:], " ") {
+			return rest[:offset]
+		}
+		if line == "<details>\n" || line == "</details>\n" {
 			return rest[:offset]
 		}
 		offset += len(line)
@@ -294,16 +297,16 @@ func TestIdenticalTreesMeasuredAnywayPass(t *testing.T) {
 func TestSlowerBenchmarkIsTheOnlyConfirmedRegression(t *testing.T) {
 	o := process(t, buildCommand(t), tree(t, nil), tree(t, slowWork), writeConfig(t, judgeAll))
 	wantCode(t, o, 1)
-	if confirmed := rows(section(t, o.report, "## Confirmed regressions")); len(confirmed) != 1 || !hasRow(confirmed, "BenchmarkWork"+procs(), "sec/op") {
-		t.Errorf("confirmed regressions %q, want the sec/op row of BenchmarkWork%s alone", confirmed, procs())
+	if regressions := rows(section(t, o.report, "## Regressions")); len(regressions) != 1 || !hasRow(regressions, "a · Work", "time") {
+		t.Errorf("regressions %q, want the time row of BenchmarkWork alone", regressions)
 	}
 }
 
 func TestExtraAllocationFailsOnAllocs(t *testing.T) {
 	o := process(t, buildCommand(t), tree(t, nil), tree(t, allocWork), writeConfig(t, `{"sec/op": 9, "allocs/op": 0.5}`))
 	wantCode(t, o, 1)
-	if confirmed := rows(section(t, o.report, "## Confirmed regressions")); len(confirmed) != 1 || !hasRow(confirmed, "BenchmarkWork"+procs(), "allocs/op") {
-		t.Errorf("confirmed regressions %q, want the allocs/op row of BenchmarkWork%s alone", confirmed, procs())
+	if regressions := rows(section(t, o.report, "## Regressions")); len(regressions) != 1 || !hasRow(regressions, "a · Work", "allocations") {
+		t.Errorf("regressions %q, want the allocations row of BenchmarkWork alone", regressions)
 	}
 }
 

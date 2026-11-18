@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/wzshiming/benchgate/sample"
+	"github.com/wzshiming/benchgate/verdict"
 )
 
 // fullConfig judges groups cpu and mem and reports group io, which it lists between them.
@@ -137,22 +138,36 @@ func TestReportHasEverySection(t *testing.T) {
 			t.Errorf("policy rows %q, want %q", got, want)
 		}
 	})
-	t.Run("confirmed regressions", func(t *testing.T) {
-		want := [][]string{{"cpu", "example.com/fake", "BenchmarkA-8", "sec/op", "+10%",
-			"100ns → 200ns, +100.00%, p=0.000", "100ns → 210ns, +110.00%, p=0.000, regression"}}
-		if got := rows(section(t, report, "## Confirmed regressions")); !slices.EqualFunc(got, want, slices.Equal) {
-			t.Errorf("confirmed regressions %q, want %q", got, want)
+	t.Run("parts", func(t *testing.T) {
+		want := []string{"## Regressions", "## Not confirmed", "## Improvements", "All results", "How this was measured"}
+		if got := outline(report); !slices.Equal(got, want) {
+			t.Errorf("parts %q, want %q", got, want)
 		}
 	})
-	t.Run("excluded after re-check", func(t *testing.T) {
-		want := [][]string{
-			{"cpu", "example.com/fake", "BenchmarkC-8", "sec/op", "+10%", "100ns → 200ns, +100.00%, p=0.000", "100ns → 100ns, +0.00%, p=1.000, not significant"},
-			{"mem", "example.com/fake", "BenchmarkE-8", "B/op", "+10%", "64B → 128B, +100.00%, p=0.000", "not measured"},
-		}
-		if got := rows(section(t, report, "## Excluded after re-check")); !slices.EqualFunc(got, want, slices.Equal) {
-			t.Errorf("excluded after re-check %q, want %q", got, want)
-		}
-	})
+	for _, p := range []struct {
+		heading, intro, header string
+		rows                   [][]string
+	}{
+		{"## Regressions", "Over the limit in both measurements.", "| Benchmark | Metric | Base | Head | Change | Re-check | Limit |",
+			[][]string{{"fake · A", "time", "100ns", "200ns", "2.0× slower", "2.1× slower", "+10%"}}},
+		{"## Not confirmed", "Over the limit in the first measurement only; these do not fail the gate.", "| Benchmark | Metric | Base | Head | Change | Re-check | Limit |",
+			[][]string{
+				{"fake · C", "time", "100ns", "200ns", "2.0× slower", "no change (within noise)", "+10%"},
+				{"fake · E", "memory", "64B", "128B", "2.0× more", "not measured", "+10%"},
+			}},
+		{"## Improvements", "Better by more than the limit; measured once.", "| Benchmark | Metric | Base | Head | Change |",
+			[][]string{{"fake · F", "time", "100ns", "50ns", "2.0× faster"}}},
+	} {
+		t.Run(strings.ToLower(strings.TrimPrefix(p.heading, "## ")), func(t *testing.T) {
+			s := section(t, report, p.heading)
+			if start := "\n" + p.intro + "\n\n" + p.header + "\n"; !strings.HasPrefix(s, start) {
+				t.Errorf("%s starts %q, want %q", p.heading, s[:min(len(s), len(start))], start)
+			}
+			if got := rows(s); !slices.EqualFunc(got, p.rows, slices.Equal) {
+				t.Errorf("%s rows %q, want %q", p.heading, got, p.rows)
+			}
+		})
+	}
 	t.Run("all results", func(t *testing.T) {
 		all := folded(t, report, "All results")
 		cpu, mem, io := strings.Index(all, "\n### cpu (judged)\n"), strings.Index(all, "\n### mem (judged)\n"), strings.Index(all, "\n### io (report only)\n")
@@ -553,7 +568,7 @@ func TestFoldedBlocksHaveBlankLinesAroundTheirMarkdown(t *testing.T) {
 	}
 }
 
-func TestFoldedBlocksNeverSayNone(t *testing.T) {
+func TestReportNeverSaysNone(t *testing.T) {
 	t.Parallel()
 	for _, c := range []struct {
 		name   string
@@ -568,12 +583,110 @@ func TestFoldedBlocksNeverSayNone(t *testing.T) {
 			f := &fake{passes: c.passes}
 			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Groups = c.groups })
 			wantCode(t, o, 0)
-			// The folded blocks end the report.
-			_, blocks, ok := strings.Cut(o.report, "\n<details>\n")
-			if !ok || strings.Contains(blocks, "None.") {
-				t.Errorf("folded blocks %q, want some and none saying None.", blocks)
+			if strings.Contains(o.report, "None.") {
+				t.Errorf("report says None.:\n%s", o.report)
 			}
 		})
+	}
+}
+
+func TestReportLeavesOutPartsWithoutContent(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		passes []map[string]canned
+		want   []string
+	}{
+		{"nothing compared", []map[string]canned{{}}, []string{"How this was measured"}},
+		{"nothing changed", []map[string]canned{{"cpu": clean}}, []string{"All results", "How this was measured"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: c.passes}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			wantCode(t, o, 0)
+			if got := outline(o.report); !slices.Equal(got, c.want) {
+				t.Errorf("parts %q, want %q:\n%s", got, c.want, o.report)
+			}
+		})
+	}
+}
+
+func TestChangeIsSaidInPlainWords(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		metric     string
+		base, head float64
+		want       string
+	}{
+		{"sec/op", 369e-6, 7.407e-3, "20.1× slower"},
+		{"sec/op", 100e-9, 112.3e-9, "12.3% slower"},
+		{"sec/op", 150e-9, 100e-9, "33.3% faster"},
+		{"sec/op", 400e-9, 100e-9, "4.0× faster"},
+		{"sec/op", 1e-6, 150e-6, "150× slower"},
+		{"B/op", 163 << 10, 3.184 * (1 << 20), "20.0× more"},
+		{"B/op", 1000, 877, "12.3% less"},
+		{"allocs/op", 3209, 64190, "20.0× more"},
+		{"allocs/op", 2, 1, "2.0× fewer"},
+		{"B/op", 0, 64, "up from 0"},
+		{"allocs/op", 3, 0, "down to 0"},
+	} {
+		r := verdict.Row{Metric: c.metric, Base: verdict.Side{N: 10, Median: c.base}, Head: verdict.Side{N: 10, Median: c.head}}
+		if got := plainChange(r); got != c.want {
+			t.Errorf("%s from %v to %v: %q, want %q", c.metric, c.base, c.head, got, c.want)
+		}
+	}
+}
+
+func TestBenchmarkCellIsThePackageAndTheShortName(t *testing.T) {
+	t.Parallel()
+	var base, head []bench
+	for _, name := range []string{"BenchmarkCompare-8", "BenchmarkFoo/n=1-8", "BenchmarkBar", "BenchmarkSize/len-1024-8"} {
+		base, head = append(base, bench{name, 200, 0, 0}), append(head, bench{name, 100, 0, 0})
+	}
+	inVerdict := func(s string) string {
+		return strings.Replace(s, "pkg: example.com/fake", "pkg: example.com/gate/verdict", 1)
+	}
+	f := &fake{passes: []map[string]canned{{"cpu": {base: inVerdict(samples(base...)), head: inVerdict(samples(head...))}}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 0)
+	var got []string
+	for _, r := range rows(section(t, o.report, "## Improvements")) {
+		got = append(got, r[0])
+	}
+	if want := []string{"verdict · Compare", "verdict · Foo/n=1", "verdict · Bar", "verdict · Size/len-1024"}; !slices.Equal(got, want) {
+		t.Errorf("benchmark cells %q, want %q", got, want)
+	}
+}
+
+func TestChangeTablesPutTheLargestChangeFirst(t *testing.T) {
+	t.Parallel()
+	// In order of appearance: A and B regress in both passes, E and F in the first alone, C and D improve.
+	first := canned{
+		base: samples(bench{"BenchmarkA-8", 100, 0, 0}, bench{"BenchmarkB-8", 100, 0, 0}, bench{"BenchmarkE-8", 100, 0, 0},
+			bench{"BenchmarkF-8", 100, 0, 0}, bench{"BenchmarkC-8", 100, 0, 0}, bench{"BenchmarkD-8", 100, 0, 0}),
+		head: samples(bench{"BenchmarkA-8", 150, 0, 0}, bench{"BenchmarkB-8", 300, 0, 0}, bench{"BenchmarkE-8", 120, 0, 0},
+			bench{"BenchmarkF-8", 1000, 0, 0}, bench{"BenchmarkC-8", 80, 0, 0}, bench{"BenchmarkD-8", 25, 0, 0}),
+	}
+	recheck := canned{
+		base: samples(bench{"BenchmarkA-8", 100, 0, 0}, bench{"BenchmarkB-8", 100, 0, 0}, bench{"BenchmarkE-8", 100, 0, 0}, bench{"BenchmarkF-8", 100, 0, 0}),
+		head: samples(bench{"BenchmarkA-8", 150, 0, 0}, bench{"BenchmarkB-8", 300, 0, 0}, bench{"BenchmarkE-8", 100, 0, 0}, bench{"BenchmarkF-8", 100, 0, 0}),
+	}
+	f := &fake{passes: []map[string]canned{{"cpu": first}, {"cpu": recheck}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 1)
+	for heading, want := range map[string][][]string{
+		"## Regressions":   {{"fake · B", "3.0× slower"}, {"fake · A", "50.0% slower"}},
+		"## Not confirmed": {{"fake · F", "10.0× slower"}, {"fake · E", "20.0% slower"}},
+		"## Improvements":  {{"fake · D", "4.0× faster"}, {"fake · C", "20.0% faster"}},
+	} {
+		var got [][]string
+		for _, r := range rows(section(t, o.report, heading)) {
+			got = append(got, []string{r[0], r[4]})
+		}
+		if !slices.EqualFunc(got, want, slices.Equal) {
+			t.Errorf("%s benchmarks and changes %q, want %q", heading, got, want)
+		}
 	}
 }
 
@@ -650,4 +763,18 @@ func hasRow(table [][]string, cells ...string) bool {
 		}
 		return true
 	})
+}
+
+// outline is the report's level-2 headings and the summaries of its folded blocks, in order.
+func outline(report string) []string {
+	var parts []string
+	for line := range strings.Lines(report) {
+		line = strings.TrimSuffix(line, "\n")
+		if summary, ok := strings.CutPrefix(line, "<summary>"); ok {
+			parts = append(parts, strings.TrimSuffix(summary, "</summary>"))
+		} else if strings.HasPrefix(line, "## ") {
+			parts = append(parts, line)
+		}
+	}
+	return parts
 }

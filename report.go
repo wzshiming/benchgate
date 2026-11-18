@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/wzshiming/benchgate/sample"
 	"github.com/wzshiming/benchgate/verdict"
+	"golang.org/x/perf/benchfmt"
 )
 
 // reasons say why a package was not measured.
@@ -23,6 +25,13 @@ var reasons = map[sample.State]string{
 // outcomes are what can become of a benchmark, in the order the count sentence lists them.
 var outcomes = []string{"regressed", "improved", "unchanged", "new", "removed", "not judged"}
 
+// metricWords are what the tables call each judged metric and the words for it going up and down.
+var metricWords = map[string]struct{ name, up, down string }{
+	"sec/op":    {"time", "slower", "faster"},
+	"B/op":      {"memory", "more", "less"},
+	"allocs/op": {"allocations", "more", "fewer"},
+}
+
 // render is the Markdown report of res, a run of the gate under cfg as o asked for it.
 func render(o Options, cfg Config, res result) []byte {
 	var b strings.Builder
@@ -34,10 +43,10 @@ func render(o Options, cfg Config, res result) []byte {
 		}
 	}
 	headline(&b, total, res.first)
-	b.WriteString("## Confirmed regressions\n\n")
-	suspects(&b, cfg, confirmed)
-	b.WriteString("## Excluded after re-check\n\n")
-	suspects(&b, cfg, excluded)
+	suspects(&b, cfg, "Regressions", "Over the limit in both measurements.", confirmed, plainChange)
+	suspects(&b, cfg, "Not confirmed", "Over the limit in the first measurement only; these do not fail the gate.", excluded,
+		func(r verdict.Row) string { return cmp.Or(plain(r, false), "not measured") })
+	improvements(&b, cfg, res)
 	if all := comparison(o, cfg, res, confirmed); all != "" {
 		fold(&b, "All results", all)
 	}
@@ -156,18 +165,76 @@ func policy(b *strings.Builder, cfg Config) {
 	table(b, []string{"Group", "Packages", "Benchmarks", "Benchtime", "Rounds", "Thresholds"}, rows)
 }
 
-// suspects writes a table of suspects with the numbers of both passes.
-func suspects(b *strings.Builder, cfg Config, list []suspect) {
+// suspects writes the part heading, intro and a row of each of list, the largest change first; recheck says what the re-check found.
+func suspects(b *strings.Builder, cfg Config, heading, intro string, list []suspect, recheck func(verdict.Row) string) {
 	var rows [][]string
-	for _, s := range list {
-		recheck := "not measured"
-		if s.recheck.Class != "" {
-			recheck = numbers(s.recheck) + ", " + string(s.recheck.Class)
-		}
-		rows = append(rows, []string{s.group, s.first.Pkg, s.first.Name, s.first.Metric,
-			percent(cfg.group(s.group).Thresholds[s.first.Metric]), numbers(s.first), recheck})
+	for _, s := range slices.SortedStableFunc(slices.Values(list), func(x, y suspect) int { return largestFirst(x.first, y.first) }) {
+		rows = append(rows, append(changeCells(s.first), recheck(s.recheck), percent(cfg.group(s.group).Thresholds[s.first.Metric])))
 	}
-	table(b, []string{"Group", "Package", "Benchmark", "Metric", "Threshold", "First pass", "Re-check"}, rows)
+	part(b, heading, intro, []string{"Benchmark", "Metric", "Base", "Head", "Change", "Re-check", "Limit"}, rows)
+}
+
+// improvements writes the part of the rows that improved in the first pass, the largest change first.
+func improvements(b *strings.Builder, cfg Config, res result) {
+	var better []verdict.Row
+	for _, g := range cfg.Groups {
+		for _, r := range res.first.verdicts[g.Name].Rows {
+			if r.Class == verdict.Improvement {
+				better = append(better, r)
+			}
+		}
+	}
+	var rows [][]string
+	for _, r := range slices.SortedStableFunc(slices.Values(better), largestFirst) {
+		rows = append(rows, changeCells(r))
+	}
+	part(b, "Improvements", "Better by more than the limit; measured once.", []string{"Benchmark", "Metric", "Base", "Head", "Change"}, rows)
+}
+
+// part writes a level-2 heading, intro and a table of header and rows, or nothing without rows.
+func part(b *strings.Builder, heading, intro string, header []string, rows [][]string) {
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(b, "## %s\n\n%s\n\n", heading, intro)
+	table(b, header, rows)
+}
+
+// largestFirst orders rows that changed the same way by the size of their change, the largest first.
+func largestFirst(a, b verdict.Row) int {
+	return cmp.Compare(math.Abs(b.Delta), math.Abs(a.Delta))
+}
+
+// changeCells are a row's Benchmark, Metric, Base, Head and Change cells.
+func changeCells(r verdict.Row) []string {
+	name := strings.TrimPrefix(r.Name, "Benchmark")
+	if _, parts := benchfmt.Name(name).Parts(); len(parts) > 0 && parts[len(parts)-1][0] == '-' {
+		name = strings.TrimSuffix(name, string(parts[len(parts)-1])) // a last part starting with - is GOMAXPROCS
+	}
+	return []string{path.Base(r.Pkg) + " · " + name, metricWords[r.Metric].name,
+		value(r.Base.Median, r.Metric), value(r.Head.Median, r.Metric), plainChange(r)}
+}
+
+// plainChange is a row's change in plain words, such as 12.3% slower or 4.0× faster.
+func plainChange(r verdict.Row) string {
+	base, head := r.Base.Median, r.Head.Median
+	switch {
+	case base == 0:
+		return "up from 0"
+	case head == 0:
+		return "down to 0"
+	}
+	word, factor := metricWords[r.Metric].up, head/base
+	if head < base {
+		word, factor = metricWords[r.Metric].down, base/head
+	}
+	switch {
+	case factor < 2:
+		return fmt.Sprintf("%.1f%% %s", math.Abs(head/base-1)*100, word)
+	case factor < 100:
+		return fmt.Sprintf("%.1f× %s", factor, word)
+	}
+	return fmt.Sprintf("%.0f× %s", factor, word)
 }
 
 // comparison is every row of the first pass by group, judged groups first, given the suspects the re-check confirmed.
@@ -277,11 +344,6 @@ func loadPerRound(b *strings.Builder, res result) {
 		b.WriteString("### Load per round\n\nThe 1, 5 and 15 minute load averages before each round.\n\n")
 		table(b, []string{"Round", "First pass", "Re-check"}, rows)
 	}
-}
-
-// numbers are a row's medians, change and p-value.
-func numbers(r verdict.Row) string {
-	return fmt.Sprintf("%s → %s, %s, p=%.3f", value(r.Base.Median, r.Metric), value(r.Head.Median, r.Metric), change(r.Delta), r.P)
 }
 
 // side is a side's median and interval, or empty when the row is absent there.
