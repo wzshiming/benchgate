@@ -24,21 +24,33 @@ func render(o Options, cfg Config, res result) []byte {
 	var b strings.Builder
 	confirmed, excluded := res.split()
 	fmt.Fprintf(&b, "# Benchmark gate\n\n%s\n\n", conclusion(res, len(confirmed)))
-	fmt.Fprintf(&b, "## Trees\n\n- Base: %s\n- Head: %s\n\n", o.BaseLabel, o.HeadLabel)
-	env := res.first.Env
-	fmt.Fprintf(&b, "## Environment\n\n- CPU: %s\n- Cores: %d\n- OS/arch: %s\n- Go: %s\n\n", env.CPU, env.Cores, env.OSArch, env.GoVersion)
-	policy(&b, cfg)
 	b.WriteString("## Confirmed regressions\n\n")
 	suspects(&b, cfg, confirmed)
 	b.WriteString("## Excluded after re-check\n\n")
 	suspects(&b, cfg, excluded)
 	comparison(&b, o, cfg, res)
+	fold(&b, "How this was measured", howMeasured(o, cfg, res))
+	return []byte(b.String())
+}
+
+// howMeasured is the Markdown of the How this was measured block.
+func howMeasured(o Options, cfg Config, res result) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "### Trees\n\n- Base: %s\n- Head: %s\n\n", o.BaseLabel, o.HeadLabel)
+	env := res.first.Env
+	fmt.Fprintf(&b, "### Environment\n\n- CPU: %s\n- Cores: %d\n- OS/arch: %s\n- Go: %s\n\n", env.CPU, env.Cores, env.OSArch, env.GoVersion)
+	policy(&b, cfg)
 	notMeasured(&b, res)
 	loadPerRound(&b, res)
 	if o.Reproduce != "" {
-		fmt.Fprintf(&b, "## Reproduce\n\n%s", o.Reproduce)
+		fmt.Fprintf(&b, "### Reproduce\n\n%s", o.Reproduce)
 	}
-	return []byte(b.String())
+	return b.String()
+}
+
+// fold writes md as a block folded under summary, set off by the blank lines GitHub needs to render it.
+func fold(b *strings.Builder, summary, md string) {
+	fmt.Fprintf(b, "<details>\n<summary>%s</summary>\n\n%s\n\n</details>\n\n", summary, strings.TrimRight(md, "\n"))
 }
 
 // conclusion is the report's verdict line.
@@ -60,7 +72,7 @@ func policy(b *strings.Builder, cfg Config) {
 	if cfg.MeasureIdentical {
 		identical = "measured too"
 	}
-	fmt.Fprintf(b, "## Policy\n\nSignificance level %v; a row is judged with at least %d samples on each side; identical test binaries are %s.\n\n",
+	fmt.Fprintf(b, "### Policy\n\nSignificance level %v; a row is judged with at least %d samples on each side; identical test binaries are %s.\n\n",
 		cfg.Alpha, cfg.MinSamples, identical)
 	var rows [][]string
 	for _, g := range cfg.Groups {
@@ -137,7 +149,6 @@ func cells(r verdict.Row) []string {
 }
 
 func notMeasured(b *strings.Builder, res result) {
-	b.WriteString("## Not measured\n\n")
 	var rows [][]string
 	for _, p := range []struct {
 		name string
@@ -151,11 +162,13 @@ func notMeasured(b *strings.Builder, res result) {
 			}
 		}
 	}
-	table(b, []string{"Pass", "Group", "Package", "Reason"}, rows)
+	if len(rows) > 0 {
+		b.WriteString("### Not measured\n\n")
+		table(b, []string{"Pass", "Group", "Package", "Reason"}, rows)
+	}
 }
 
 func loadPerRound(b *strings.Builder, res result) {
-	b.WriteString("## Load per round\n\nThe 1, 5 and 15 minute load averages before each round.\n\n")
 	first, recheck := res.first.Env.Loads, res.recheck.Env.Loads
 	var rows [][]string
 	for i := range max(len(first), len(recheck)) {
@@ -168,7 +181,10 @@ func loadPerRound(b *strings.Builder, res result) {
 		}
 		rows = append(rows, row)
 	}
-	table(b, []string{"Round", "First pass", "Re-check"}, rows)
+	if len(rows) > 0 {
+		b.WriteString("### Load per round\n\nThe 1, 5 and 15 minute load averages before each round.\n\n")
+		table(b, []string{"Round", "First pass", "Re-check"}, rows)
+	}
 }
 
 // numbers are a row's medians, change and p-value.

@@ -103,18 +103,18 @@ func TestReportHasEverySection(t *testing.T) {
 		}
 	})
 	t.Run("trees", func(t *testing.T) {
-		if got, want := section(t, report, "## Trees"), "\n- Base: abc1234\n- Head: def5678 (merge)\n\n"; got != want {
+		if got, want := section(t, folded(t, report, "How this was measured"), "### Trees"), "\n- Base: abc1234\n- Head: def5678 (merge)\n\n"; got != want {
 			t.Errorf("trees %q, want %q", got, want)
 		}
 	})
 	t.Run("environment", func(t *testing.T) {
 		want := "\n- CPU: Fake CPU @ 3.00GHz\n- Cores: 8\n- OS/arch: linux/amd64\n- Go: go1.27.3\n\n"
-		if got := section(t, report, "## Environment"); got != want {
+		if got := section(t, folded(t, report, "How this was measured"), "### Environment"); got != want {
 			t.Errorf("environment %q, want %q", got, want)
 		}
 	})
 	t.Run("policy", func(t *testing.T) {
-		policy := section(t, report, "## Policy")
+		policy := section(t, folded(t, report, "How this was measured"), "### Policy")
 		if want := "Significance level 0.05; a row is judged with at least 10 samples on each side; identical test binaries are not measured."; !strings.Contains(policy, want) {
 			t.Errorf("policy %q does not say %q", policy, want)
 		}
@@ -179,12 +179,12 @@ func TestReportHasEverySection(t *testing.T) {
 			{"first", "cpu", "s", "base failed to build or run"},
 			{"re-check", "mem", "u", "base failed to build or run"},
 		}
-		if got := rows(section(t, report, "## Not measured")); !slices.EqualFunc(got, want, slices.Equal) {
+		if got := rows(section(t, folded(t, report, "How this was measured"), "### Not measured")); !slices.EqualFunc(got, want, slices.Equal) {
 			t.Errorf("not measured %q, want %q", got, want)
 		}
 	})
 	t.Run("load per round", func(t *testing.T) {
-		got := rows(section(t, report, "## Load per round"))
+		got := rows(section(t, folded(t, report, "How this was measured"), "### Load per round"))
 		if len(got) != 10 || !hasRow(got, "1", "0.01 0.50 0.90", "1.01 0.50 0.90") || !hasRow(got, "10", "0.10 0.50 0.90", "1.10 0.50 0.90") {
 			t.Errorf("loads %q, want ten rounds of both passes", got)
 		}
@@ -293,19 +293,100 @@ func TestConclusionLine(t *testing.T) {
 	}
 }
 
-func TestReproduceTextEndsTheReportVerbatim(t *testing.T) {
+func TestHowThisWasMeasuredIsThereWhenNothingWasMeasured(t *testing.T) {
 	t.Parallel()
-	const text = "Check out `<base>` and `<head>`, then run:\n\n```sh\nmake gate BASE=<base> HEAD=<head> # 100% | %s\n```\n"
-	r := runFull(t, func(o *Options) { o.Reproduce = text })
-	if want := "\n## Reproduce\n\n" + text; !strings.HasSuffix(r.report, want) {
-		t.Errorf("report ends %q, want %q", r.report[max(0, len(r.report)-len(want)):], want)
+	f := &fake{passes: []map[string]canned{{}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 0)
+	how := folded(t, o.report, "How this was measured")
+	for _, part := range []string{"### Trees", "### Environment", "### Policy"} {
+		if !strings.Contains(how, "\n"+part+"\n") {
+			t.Errorf("how this was measured has no %s:\n%s", part, how)
+		}
 	}
 }
 
-func TestReportWithoutReproduceTextHasNoReproduceSection(t *testing.T) {
+func TestNotMeasuredIsLeftOutWhenEveryPackageWasMeasured(t *testing.T) {
 	t.Parallel()
-	if r := runFull(t); strings.Contains(r.report, "## Reproduce") {
-		t.Errorf("report without a reproduce text has a Reproduce section:\n%s", r.report)
+	f := &fake{passes: []map[string]canned{{"cpu": clean}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Groups = []string{"cpu"} })
+	wantCode(t, o, 0)
+	if how := folded(t, o.report, "How this was measured"); strings.Contains(how, "### Not measured") {
+		t.Errorf("how this was measured lists packages not measured though every package was:\n%s", how)
+	}
+}
+
+func TestLoadPerRoundIsLeftOutWhenNoRoundRan(t *testing.T) {
+	t.Parallel()
+	f := &fake{passes: []map[string]canned{{}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 0)
+	if how := folded(t, o.report, "How this was measured"); strings.Contains(how, "### Load per round") {
+		t.Errorf("how this was measured has a load per round though no round ran:\n%s", how)
+	}
+}
+
+func TestReproduceTextEndsHowThisWasMeasuredVerbatim(t *testing.T) {
+	t.Parallel()
+	const text = "Check out `<base>` and `<head>`, then run:\n\n```sh\nmake gate BASE=<base> HEAD=<head> # 100% | %s\n```\n"
+	how := folded(t, runFull(t, func(o *Options) { o.Reproduce = text }).report, "How this was measured")
+	if want := "\n### Reproduce\n\n" + text + "\n"; !strings.HasSuffix(how, want) {
+		t.Errorf("how this was measured ends %q, want %q", how[max(0, len(how)-len(want)):], want)
+	}
+}
+
+func TestHowThisWasMeasuredWithoutReproduceTextHasNoReproducePart(t *testing.T) {
+	t.Parallel()
+	if how := folded(t, runFull(t).report, "How this was measured"); strings.Contains(how, "### Reproduce") {
+		t.Errorf("how this was measured without a reproduce text has a Reproduce part:\n%s", how)
+	}
+}
+
+func TestFoldedBlocksHaveBlankLinesAroundTheirMarkdown(t *testing.T) {
+	t.Parallel()
+	// A reproduce text without a final newline ends a block.
+	lines := strings.Split(runFull(t, func(o *Options) { o.Reproduce = "Run `make gate`." }).report, "\n")
+	opened, closed := 0, 0
+	for i, line := range lines {
+		switch {
+		case strings.HasPrefix(line, "<summary>"):
+			opened++
+			if lines[i-1] != "<details>" || i+1 == len(lines) || lines[i+1] != "" {
+				t.Errorf("line %d, %q, is not between a <details> line and a blank line", i+1, line)
+			}
+		case strings.Contains(line, "</details>"):
+			closed++
+			if line != "</details>" || lines[i-1] != "" {
+				t.Errorf("line %d, %q, is not a closing tag alone after a blank line", i+1, line)
+			}
+		}
+	}
+	if opened == 0 || closed != opened {
+		t.Errorf("report opens %d folded blocks and closes %d, want some and as many closed:\n%s", opened, closed, strings.Join(lines, "\n"))
+	}
+}
+
+func TestFoldedBlocksNeverSayNone(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name   string
+		passes []map[string]canned
+		groups []string
+	}{
+		{"nothing measured", []map[string]canned{{}}, nil},
+		{"every package measured", []map[string]canned{{"cpu": clean}}, []string{"cpu"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: c.passes}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) { o.Groups = c.groups })
+			wantCode(t, o, 0)
+			// The folded blocks end the report.
+			_, blocks, ok := strings.Cut(o.report, "\n<details>\n")
+			if !ok || strings.Contains(blocks, "None.") {
+				t.Errorf("folded blocks %q, want some and none saying None.", blocks)
+			}
+		})
 	}
 }
 
@@ -325,6 +406,17 @@ func section(t *testing.T, report, heading string) string {
 		offset += len(line)
 	}
 	return rest
+}
+
+// folded is the part of report folded under summary, from the end of the summary line to the closing tag.
+func folded(t *testing.T, report, summary string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(report, "<details>\n<summary>"+summary+"</summary>\n")
+	if !ok {
+		t.Fatalf("no block %q in the report:\n%s", summary, report)
+	}
+	md, _, _ := strings.Cut(rest, "</details>")
+	return md
 }
 
 // rows are the cells of the table rows in s, without headers and separators.

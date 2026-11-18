@@ -323,7 +323,7 @@ func TestBaseFailureReasonGoesToStderrNotTheReport(t *testing.T) {
 	if strings.Contains(o.report, "boom") || strings.Contains(o.report, "/home/runner") {
 		t.Errorf("report holds the reason:\n%s", o.report)
 	}
-	if notMeasured := rows(section(t, o.report, "## Not measured")); !hasRow(notMeasured, "cpu", "p", "base failed to build or run") {
+	if notMeasured := rows(section(t, folded(t, o.report, "How this was measured"), "### Not measured")); !hasRow(notMeasured, "cpu", "p", "base failed to build or run") {
 		t.Errorf("not measured %q, want package p for its failing base", notMeasured)
 	}
 }
