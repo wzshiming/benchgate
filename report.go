@@ -240,32 +240,43 @@ func plainChange(r verdict.Row) string {
 // comparison is every row of the first pass by group, judged groups first, given the suspects the re-check confirmed.
 func comparison(o Options, cfg Config, res result, confirmed []suspect) string {
 	var b strings.Builder
-	for _, reportOnly := range []bool{false, true} {
-		for _, g := range cfg.Groups {
-			if g.ReportOnly != reportOnly || len(res.first.verdicts[g.Name].Rows) == 0 {
-				continue
-			}
-			kind := "judged"
-			if reportOnly {
-				kind = "report only"
-			}
-			fmt.Fprintf(&b, "### %s (%s)\n\n", g.Name, kind)
-			if base, head := res.first.files(g.Name); base != "" {
-				fmt.Fprintf(&b, "Samples: `%s`, `%s`", o.inOut(base), o.inOut(head))
-				if base, head := res.recheck.files(g.Name); base != "" {
-					fmt.Fprintf(&b, "; re-check: `%s`, `%s`", o.inOut(base), o.inOut(head))
-				}
-				b.WriteString(".\n\n")
-			}
-			var rows [][]string
-			for _, r := range res.first.verdicts[g.Name].Rows {
-				held := slices.ContainsFunc(confirmed, func(s suspect) bool { return s.group == g.Name && s.first.Key == r.Key })
-				rows = append(rows, cells(r, held))
-			}
-			table(&b, []string{"Package", "Benchmark", "Metric", "Base", "Head", "Delta", "p", "n", "Result"}, rows)
+	for _, g := range judgedFirst(cfg.Groups) {
+		if len(res.first.verdicts[g.Name].Rows) == 0 {
+			continue
 		}
+		kind := "judged"
+		if g.ReportOnly {
+			kind = "report only"
+		}
+		fmt.Fprintf(&b, "### %s (%s)\n\n", g.Name, kind)
+		if base, head := res.first.files(g.Name); base != "" {
+			fmt.Fprintf(&b, "Samples: `%s`, `%s`", o.inOut(base), o.inOut(head))
+			if base, head := res.recheck.files(g.Name); base != "" {
+				fmt.Fprintf(&b, "; re-check: `%s`, `%s`", o.inOut(base), o.inOut(head))
+			}
+			b.WriteString(".\n\n")
+		}
+		var rows [][]string
+		for _, r := range res.first.verdicts[g.Name].Rows {
+			held := slices.ContainsFunc(confirmed, func(s suspect) bool { return s.group == g.Name && s.first.Key == r.Key })
+			rows = append(rows, cells(r, held))
+		}
+		table(&b, []string{"Package", "Benchmark", "Metric", "Base", "Head", "Delta", "p", "n", "Result"}, rows)
 	}
 	return b.String()
+}
+
+// judgedFirst are groups with the judged ones first, each kind in its order.
+func judgedFirst(groups []Group) []Group {
+	var judged, reportOnly []Group
+	for _, g := range groups {
+		if g.ReportOnly {
+			reportOnly = append(reportOnly, g)
+		} else {
+			judged = append(judged, g)
+		}
+	}
+	return append(judged, reportOnly...)
 }
 
 // cells are a compared row as the comparison shows it.
