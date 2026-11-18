@@ -151,7 +151,7 @@ func TestResultsHoldTheReportTheSamplesAndTheGatesErrors(t *testing.T) {
 
 func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
 	t.Parallel()
-	fail := "# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n    benchgate: stand-in error\n    \tsecond line\n"
+	fail := "# Benchmark gate: FAIL, nothing to conclude\n\nThe gate exited %d:\n\n    benchgate: stand-in error\n    \tsecond line\n"
 	for _, c := range []struct {
 		code    int
 		summary string

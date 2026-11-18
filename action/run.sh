@@ -29,7 +29,7 @@ if ((code <= 1)); then
 	cat "$report" >>"$GITHUB_STEP_SUMMARY"
 else
 	{
-		printf '# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n' "$code"
+		printf '# Benchmark gate: FAIL, nothing to conclude\n\nThe gate exited %d:\n\n' "$code"
 		sed 's/^/    /' "$RESULTS/stderr.txt"
 	} >>"$GITHUB_STEP_SUMMARY"
 fi
