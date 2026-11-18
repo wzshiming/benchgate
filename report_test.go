@@ -54,9 +54,13 @@ type fullRun struct {
 
 func runFull(t *testing.T, edits ...func(*Options)) fullRun {
 	t.Helper()
+	// BenchmarkF-8 improves, BenchmarkW-8 slows within its limit and BenchmarkT-8 has five head samples.
 	cpu := canned{
-		base: samples(bench{"BenchmarkA-8", 100, 64, 1}, bench{"BenchmarkC-8", 100, 64, 1}, bench{"BenchmarkR-8", 100, 0, 0}, bench{"BenchmarkZ-8", 100, 0, 0}),
-		head: samples(bench{"BenchmarkA-8", 200, 64, 1}, bench{"BenchmarkC-8", 200, 64, 1}, bench{"BenchmarkN-8", 100, 0, 0}) + alternating("BenchmarkZ-8", 70, 130),
+		base: samples(bench{"BenchmarkA-8", 100, 64, 1}, bench{"BenchmarkC-8", 100, 64, 1}, bench{"BenchmarkR-8", 100, 0, 0}, bench{"BenchmarkZ-8", 100, 0, 0},
+			bench{"BenchmarkF-8", 100, 0, 0}, bench{"BenchmarkW-8", 100, 0, 0}, bench{"BenchmarkT-8", 100, 0, 0}),
+		head: samples(bench{"BenchmarkA-8", 200, 64, 1}, bench{"BenchmarkC-8", 200, 64, 1}, bench{"BenchmarkN-8", 100, 0, 0},
+			bench{"BenchmarkF-8", 50, 0, 0}, bench{"BenchmarkW-8", 105, 0, 0}) + alternating("BenchmarkZ-8", 70, 130) +
+			strings.Repeat("BenchmarkT-8 1000 100 ns/op 0 B/op 0 allocs/op\n", 5),
 		states: []sample.Status{
 			{Package: "p", State: sample.Measured}, {Package: "q", State: sample.Identical},
 			{Package: "r", State: sample.BaseMissing}, {Package: "s", State: sample.BaseFailed},
@@ -143,33 +147,14 @@ func TestReportHasEverySection(t *testing.T) {
 			t.Errorf("excluded after re-check %q, want %q", got, want)
 		}
 	})
-	t.Run("comparison", func(t *testing.T) {
-		comparison := section(t, report, "## Comparison")
-		cpu, mem, io := strings.Index(comparison, "\n### cpu (judged)\n"), strings.Index(comparison, "\n### mem (judged)\n"), strings.Index(comparison, "\n### io (report only)\n")
+	t.Run("all results", func(t *testing.T) {
+		all := folded(t, report, "All results")
+		cpu, mem, io := strings.Index(all, "\n### cpu (judged)\n"), strings.Index(all, "\n### mem (judged)\n"), strings.Index(all, "\n### io (report only)\n")
 		if cpu < 0 || mem < cpu || io < mem {
-			t.Errorf("comparison headings at %d, %d, %d; want cpu, mem, then io", cpu, mem, io)
+			t.Errorf("all results headings at %d, %d, %d; want cpu, mem, then io", cpu, mem, io)
 		}
-		rowsOf := func(heading string) [][]string { return rows(section(t, report, heading)) }
-		if got, want := rowsOf("### cpu (judged)"), []string{"example.com/fake", "BenchmarkA-8", "sec/op", "100ns ±0%", "200ns ±0%", "+100.00%", "0.000", "10+10", "regression", ""}; !slices.ContainsFunc(got, func(r []string) bool { return slices.Equal(r, want) }) {
-			t.Errorf("cpu rows %q, want %q", got, want)
-		}
-		for _, c := range []struct {
-			heading string
-			cells   []string
-		}{
-			{"### cpu (judged)", []string{"BenchmarkN-8", "sec/op", "new"}},
-			{"### cpu (judged)", []string{"BenchmarkN-8", "B/op", "", "0B ±0%", "new"}},
-			{"### cpu (judged)", []string{"BenchmarkR-8", "sec/op", "removed"}},
-			{"### cpu (judged)", []string{"BenchmarkZ-8", "sec/op", "100ns ±30%", "noisy"}},
-			{"### mem (judged)", []string{"BenchmarkE-8", "B/op", "regression"}},
-			{"### io (report only)", []string{"BenchmarkD-8", "sec/op", "100ns ±0%", "200ns ±∞", "report only"}},
-		} {
-			if got := rowsOf(c.heading); !hasRow(got, c.cells...) {
-				t.Errorf("%s rows %q, want a row with %q", c.heading, got, c.cells)
-			}
-		}
-		if cpu := section(t, report, "### cpu (judged)"); !strings.Contains(cpu, "`first/cpu.base.txt`, `first/cpu.head.txt`") || !strings.Contains(cpu, "`recheck/cpu.base.txt`, `recheck/cpu.head.txt`") {
-			t.Errorf("cpu comparison %q does not name the sample files of both passes", cpu)
+		if cpu := section(t, all, "### cpu (judged)"); !strings.Contains(cpu, "`first/cpu.base.txt`, `first/cpu.head.txt`") || !strings.Contains(cpu, "`recheck/cpu.base.txt`, `recheck/cpu.head.txt`") {
+			t.Errorf("cpu results %q do not name the sample files of both passes", cpu)
 		}
 	})
 	t.Run("not measured", func(t *testing.T) {
@@ -293,6 +278,138 @@ func TestConclusionLine(t *testing.T) {
 	}
 }
 
+func TestAllResultsKeepsTheComparisonColumns(t *testing.T) {
+	t.Parallel()
+	all := folded(t, runFull(t).report, "All results")
+	// The first eight cells of each row as the Comparison table showed them.
+	for _, g := range []struct {
+		heading string
+		rows    [][]string
+	}{
+		{"### cpu (judged)", [][]string{
+			{"example.com/fake", "BenchmarkA-8", "sec/op", "100ns ±0%", "200ns ±0%", "+100.00%", "0.000", "10+10"},
+			{"example.com/fake", "BenchmarkA-8", "B/op", "64B ±0%", "64B ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkA-8", "allocs/op", "1 ±0%", "1 ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkC-8", "sec/op", "100ns ±0%", "200ns ±0%", "+100.00%", "0.000", "10+10"},
+			{"example.com/fake", "BenchmarkC-8", "B/op", "64B ±0%", "64B ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkC-8", "allocs/op", "1 ±0%", "1 ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkR-8", "sec/op", "100ns ±0%", "", "", "", "10+0"},
+			{"example.com/fake", "BenchmarkR-8", "B/op", "0B ±0%", "", "", "", "10+0"},
+			{"example.com/fake", "BenchmarkR-8", "allocs/op", "0 ±0%", "", "", "", "10+0"},
+			{"example.com/fake", "BenchmarkZ-8", "sec/op", "100ns ±0%", "100ns ±30%", "-0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkZ-8", "B/op", "0B ±0%", "0B ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkZ-8", "allocs/op", "0 ±0%", "0 ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkF-8", "sec/op", "100ns ±0%", "50ns ±0%", "-50.00%", "0.000", "10+10"},
+			{"example.com/fake", "BenchmarkF-8", "B/op", "0B ±0%", "0B ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkF-8", "allocs/op", "0 ±0%", "0 ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkW-8", "sec/op", "100ns ±0%", "105ns ±0%", "+5.00%", "0.000", "10+10"},
+			{"example.com/fake", "BenchmarkW-8", "B/op", "0B ±0%", "0B ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkW-8", "allocs/op", "0 ±0%", "0 ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkT-8", "sec/op", "100ns ±0%", "100ns ±∞", "+0.00%", "1.000", "10+5"},
+			{"example.com/fake", "BenchmarkT-8", "B/op", "0B ±0%", "0B ±∞", "+0.00%", "1.000", "10+5"},
+			{"example.com/fake", "BenchmarkT-8", "allocs/op", "0 ±0%", "0 ±∞", "+0.00%", "1.000", "10+5"},
+			{"example.com/fake", "BenchmarkN-8", "sec/op", "", "100ns ±0%", "", "", "0+10"},
+			{"example.com/fake", "BenchmarkN-8", "B/op", "", "0B ±0%", "", "", "0+10"},
+			{"example.com/fake", "BenchmarkN-8", "allocs/op", "", "0 ±0%", "", "", "0+10"},
+		}},
+		{"### mem (judged)", [][]string{
+			{"example.com/fake", "BenchmarkE-8", "sec/op", "100ns ±0%", "100ns ±0%", "+0.00%", "1.000", "10+10"},
+			{"example.com/fake", "BenchmarkE-8", "B/op", "64B ±0%", "128B ±0%", "+100.00%", "0.000", "10+10"},
+			{"example.com/fake", "BenchmarkE-8", "allocs/op", "1 ±0%", "1 ±0%", "+0.00%", "1.000", "10+10"},
+		}},
+		{"### io (report only)", [][]string{
+			{"example.com/fake", "BenchmarkD-8", "sec/op", "100ns ±0%", "200ns ±∞", "+100.00%", "0.007", "10+3"},
+			{"example.com/fake", "BenchmarkD-8", "B/op", "0B ±0%", "0B ±∞", "+0.00%", "1.000", "10+3"},
+			{"example.com/fake", "BenchmarkD-8", "allocs/op", "0 ±0%", "0 ±∞", "+0.00%", "1.000", "10+3"},
+		}},
+	} {
+		s := section(t, all, g.heading)
+		if header := "\n| Package | Benchmark | Metric | Base | Head | Delta | p | n | Result |\n"; !strings.Contains(s, header) {
+			t.Errorf("%s has no header %q:\n%s", g.heading, header, s)
+		}
+		var got [][]string
+		for _, r := range rows(s) {
+			got = append(got, r[:min(len(r), 8)])
+		}
+		if !slices.EqualFunc(got, g.rows, slices.Equal) {
+			t.Errorf("%s rows begin %q, want %q", g.heading, got, g.rows)
+		}
+	}
+}
+
+func TestResultSaysEachVerdictInPlainWords(t *testing.T) {
+	t.Parallel()
+	all := folded(t, runFull(t).report, "All results")
+	for _, c := range []struct{ heading, name, metric, want string }{
+		{"### cpu (judged)", "BenchmarkA-8", "sec/op", "regression, confirmed"},
+		{"### cpu (judged)", "BenchmarkC-8", "sec/op", "regression, not confirmed"},
+		{"### mem (judged)", "BenchmarkE-8", "B/op", "regression, not confirmed"},
+		{"### cpu (judged)", "BenchmarkF-8", "sec/op", "improved"},
+		{"### cpu (judged)", "BenchmarkA-8", "B/op", "no change (within noise)"},
+		{"### cpu (judged)", "BenchmarkZ-8", "sec/op", "too noisy to tell"},
+		{"### cpu (judged)", "BenchmarkW-8", "sec/op", "within limit"},
+		{"### cpu (judged)", "BenchmarkT-8", "sec/op", "too few samples"},
+		{"### cpu (judged)", "BenchmarkN-8", "sec/op", "new"},
+		{"### cpu (judged)", "BenchmarkR-8", "sec/op", "removed"},
+		{"### io (report only)", "BenchmarkD-8", "sec/op", "not judged"},
+	} {
+		got := ""
+		for _, r := range rows(section(t, all, c.heading)) {
+			if r[1] == c.name && r[2] == c.metric {
+				got = r[len(r)-1]
+			}
+		}
+		if got != c.want {
+			t.Errorf("%s %s %s: result %q, want %q", c.heading, c.name, c.metric, got, c.want)
+		}
+	}
+}
+
+func TestAllResultsLeavesOutGroupsWithoutRows(t *testing.T) {
+	t.Parallel()
+	noRows := canned{base: "PASS\n", head: "PASS\n", states: []sample.Status{{Package: "p", State: sample.Measured}, {Package: "q", State: sample.Identical}}}
+	for _, c := range []struct {
+		name       string
+		pass       map[string]canned
+		kept, left string
+	}{
+		{"not measured", map[string]canned{"cpu": clean}, "### cpu (judged)", "### io (report only)"},
+		{"measured without rows", map[string]canned{"cpu": noRows, "io": clean}, "### io (report only)", "### cpu (judged)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: []map[string]canned{c.pass}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			wantCode(t, o, 0)
+			if all := folded(t, o.report, "All results"); !strings.Contains(all, "\n"+c.kept+"\n") || strings.Contains(all, "\n"+c.left+"\n") {
+				t.Errorf("all results %q, want %s and no %s", all, c.kept, c.left)
+			}
+		})
+	}
+}
+
+func TestAllResultsIsThereOnlyWithRows(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		pass map[string]canned
+		want bool
+	}{
+		{"rows", map[string]canned{"cpu": clean}, true},
+		{"no rows", map[string]canned{}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: []map[string]canned{c.pass}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			wantCode(t, o, 0)
+			if got := strings.Contains(o.report, "<summary>All results</summary>"); got != c.want {
+				t.Errorf("report has All results %v, want %v:\n%s", got, c.want, o.report)
+			}
+		})
+	}
+}
+
 func TestHowThisWasMeasuredIsThereWhenNothingWasMeasured(t *testing.T) {
 	t.Parallel()
 	f := &fake{passes: []map[string]canned{{}}}
@@ -390,7 +507,7 @@ func TestFoldedBlocksNeverSayNone(t *testing.T) {
 	}
 }
 
-// section is the part of report under heading, up to the next heading of its level or above.
+// section is the part of report under heading, up to the next heading of its level or above or a details tag.
 func section(t *testing.T, report, heading string) string {
 	t.Helper()
 	_, rest, ok := strings.Cut(report, "\n"+heading+"\n")
@@ -401,6 +518,9 @@ func section(t *testing.T, report, heading string) string {
 	offset := 0
 	for line := range strings.Lines(rest) {
 		if n := len(line) - len(strings.TrimLeft(line, "#")); n > 0 && n <= level && strings.HasPrefix(line[n:], " ") {
+			return rest[:offset]
+		}
+		if line == "<details>\n" || line == "</details>\n" {
 			return rest[:offset]
 		}
 		offset += len(line)

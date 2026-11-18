@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,7 +29,9 @@ func render(o Options, cfg Config, res result) []byte {
 	suspects(&b, cfg, confirmed)
 	b.WriteString("## Excluded after re-check\n\n")
 	suspects(&b, cfg, excluded)
-	comparison(&b, o, cfg, res)
+	if all := comparison(o, cfg, res, confirmed); all != "" {
+		fold(&b, "All results", all)
+	}
 	fold(&b, "How this was measured", howMeasured(o, cfg, res))
 	return []byte(b.String())
 }
@@ -105,47 +108,74 @@ func suspects(b *strings.Builder, cfg Config, list []suspect) {
 	table(b, []string{"Group", "Package", "Benchmark", "Metric", "Threshold", "First pass", "Re-check"}, rows)
 }
 
-// comparison writes every row of the first pass by group, judged groups first.
-func comparison(b *strings.Builder, o Options, cfg Config, res result) {
-	b.WriteString("## Comparison\n\n")
+// comparison is every row of the first pass by group, judged groups first, given the suspects the re-check confirmed.
+func comparison(o Options, cfg Config, res result, confirmed []suspect) string {
+	var b strings.Builder
 	for _, reportOnly := range []bool{false, true} {
 		for _, g := range cfg.Groups {
-			if g.ReportOnly != reportOnly {
+			if g.ReportOnly != reportOnly || len(res.first.verdicts[g.Name].Rows) == 0 {
 				continue
 			}
 			kind := "judged"
 			if reportOnly {
 				kind = "report only"
 			}
-			fmt.Fprintf(b, "### %s (%s)\n\n", g.Name, kind)
+			fmt.Fprintf(&b, "### %s (%s)\n\n", g.Name, kind)
 			if base, head := res.first.files(g.Name); base != "" {
-				fmt.Fprintf(b, "Samples: `%s`, `%s`", o.inOut(base), o.inOut(head))
+				fmt.Fprintf(&b, "Samples: `%s`, `%s`", o.inOut(base), o.inOut(head))
 				if base, head := res.recheck.files(g.Name); base != "" {
-					fmt.Fprintf(b, "; re-check: `%s`, `%s`", o.inOut(base), o.inOut(head))
+					fmt.Fprintf(&b, "; re-check: `%s`, `%s`", o.inOut(base), o.inOut(head))
 				}
 				b.WriteString(".\n\n")
 			}
 			var rows [][]string
 			for _, r := range res.first.verdicts[g.Name].Rows {
-				rows = append(rows, cells(r))
+				held := slices.ContainsFunc(confirmed, func(s suspect) bool { return s.group == g.Name && s.first.Key == r.Key })
+				rows = append(rows, cells(r, held))
 			}
-			table(b, []string{"Package", "Benchmark", "Metric", "Base", "Head", "Delta", "p", "n", "Class", "Noisy"}, rows)
+			table(&b, []string{"Package", "Benchmark", "Metric", "Base", "Head", "Delta", "p", "n", "Result"}, rows)
 		}
 	}
+	return b.String()
 }
 
 // cells are a compared row as the comparison shows it.
-func cells(r verdict.Row) []string {
+func cells(r verdict.Row, confirmed bool) []string {
 	delta, p := "", ""
 	if r.Class != verdict.New && r.Class != verdict.Removed {
 		delta, p = change(r.Delta), fmt.Sprintf("%.3f", r.P)
 	}
-	noisy := ""
-	if r.Noisy {
-		noisy = "noisy"
-	}
 	return []string{r.Pkg, r.Name, r.Metric, side(r.Base, r.Metric), side(r.Head, r.Metric),
-		delta, p, fmt.Sprintf("%d+%d", r.Base.N, r.Head.N), string(r.Class), noisy}
+		delta, p, fmt.Sprintf("%d+%d", r.Base.N, r.Head.N), plain(r, confirmed)}
+}
+
+// plain is a row's verdict in plain words; confirmed tells whether the re-check found the row regressed too.
+func plain(r verdict.Row, confirmed bool) string {
+	switch r.Class {
+	case verdict.Regression:
+		if confirmed {
+			return "regression, confirmed"
+		}
+		return "regression, not confirmed"
+	case verdict.Improvement:
+		return "improved"
+	case verdict.NotSignificant:
+		if r.Noisy {
+			return "too noisy to tell"
+		}
+		return "no change (within noise)"
+	case verdict.BelowThreshold:
+		return "within limit"
+	case verdict.TooFewSamples:
+		return "too few samples"
+	case verdict.New:
+		return "new"
+	case verdict.Removed:
+		return "removed"
+	case verdict.ReportOnly:
+		return "not judged"
+	}
+	return ""
 }
 
 func notMeasured(b *strings.Builder, res result) {
