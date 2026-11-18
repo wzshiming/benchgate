@@ -507,6 +507,20 @@ func TestFoldedBlocksNeverSayNone(t *testing.T) {
 	}
 }
 
+func TestBenchmarkNameCannotOpenOrCloseAFoldedBlock(t *testing.T) {
+	t.Parallel()
+	odd := bench{"BenchmarkA/</details><details>-8", 100, 64, 1}
+	f := &fake{passes: []map[string]canned{{"cpu": {base: samples(odd), head: samples(odd)}}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 0)
+	if opened, closed := strings.Count(o.report, "<details>"), strings.Count(o.report, "</details>"); opened != 2 || closed != 2 {
+		t.Errorf("report opens %d folded blocks and closes %d, want the two blocks alone:\n%s", opened, closed, o.report)
+	}
+	if got := rows(section(t, folded(t, o.report, "All results"), "### cpu (judged)")); len(got) != 3 {
+		t.Errorf("all results ends within the rows of %s; rows before its end %q", odd.name, got)
+	}
+}
+
 // section is the part of report under heading, up to the next heading of its level or above or a details tag.
 func section(t *testing.T, report, heading string) string {
 	t.Helper()
