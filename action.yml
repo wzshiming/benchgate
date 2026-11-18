@@ -23,6 +23,14 @@ inputs:
     required: false
     default: benchgate-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_attempt }}
 
+outputs:
+  conclusion:
+    description: pass, regression or error as the gate exited 0, 1 or otherwise; empty if the gate did not run.
+    value: ${{ steps.gate.outputs.conclusion }}
+  report:
+    description: Path of the gate's report.md on the runner; empty unless the gate exited 0 or 1.
+    value: ${{ steps.gate.outputs.report }}
+
 runs:
   using: composite
   steps:

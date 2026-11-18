@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -166,6 +168,50 @@ func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
 				t.Errorf("step exited %d with the summary %q, want %d with %q\n%s", s.code, s.summary, c.code, c.summary, s.log)
 			}
 		})
+	}
+}
+
+func TestOutputsFollowTheGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		code       int
+		conclusion string
+		reported   bool
+	}{
+		{0, "pass", true},
+		{1, "regression", true},
+		{2, "error", false},
+		{3, "error", false},
+	} {
+		t.Run(fmt.Sprint("gate exiting ", c.code), func(t *testing.T) {
+			t.Parallel()
+			env, _, _ := gating(t, c.code)
+			s := run(t, "run.sh", t.TempDir(), env)
+			want := map[string]string{"conclusion": c.conclusion, "report": ""}
+			if c.reported {
+				want["report"] = env["RESULTS"] + "/out/report.md"
+			}
+			if !maps.Equal(s.outputs, want) {
+				t.Errorf("outputs %q, want %q\n%s", s.outputs, want, s.log)
+			}
+		})
+	}
+}
+
+func TestActionOutputsAreTheGateSteps(t *testing.T) {
+	t.Parallel()
+	action, err := os.ReadFile("../action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^      id: gate\n(?:      .*\n)*?      run: bash "\$GITHUB_ACTION_PATH/action/run\.sh"$`).Match(action) {
+		t.Error("action.yml has no step gate running run.sh")
+	}
+	for _, name := range []string{"conclusion", "report"} {
+		declared := `(?m)^outputs:\n(?:  .*\n)*?  ` + name + `:\n(?:    .*\n)*?    value: \$\{\{ steps\.gate\.outputs\.` + name + ` \}\}$`
+		if !regexp.MustCompile(declared).Match(action) {
+			t.Errorf("action.yml declares no output %s taken from the step gate", name)
+		}
 	}
 }
 
