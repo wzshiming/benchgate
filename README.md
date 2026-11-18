@@ -77,7 +77,7 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: wzshiming/benchgate@master # or a full commit sha
+      - uses: wzshiming/benchgate@v0.0.1 # or a full commit sha
         with:
           config: benchgate.json
 ```
@@ -117,4 +117,4 @@ no override: the check stays red, and a maintainer decides whether to merge.
 The command and the Action support Linux and macOS. The module is also a Go
 library: `Run` runs the gate as the command does, `LoadConfig` reads a
 configuration, and the packages `sample` and `verdict` take the samples and
-judge the rows. It is at v0 and untagged: its API may change in any commit.
+judge the rows. It is at v0: its API may change in any commit.
