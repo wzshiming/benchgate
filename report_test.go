@@ -102,8 +102,14 @@ func TestReportHasEverySection(t *testing.T) {
 	report := r.report
 
 	t.Run("conclusion", func(t *testing.T) {
-		if lines := strings.SplitN(report, "\n", 4); len(lines) < 3 || lines[2] != "**FAIL**: 1 confirmed regression." {
-			t.Errorf("report starts %q, want the title and the conclusion", lines)
+		if first, _, _ := strings.Cut(report, "\n"); first != "# Benchmark gate: FAIL, 1 benchmark regressed" {
+			t.Errorf("first line %q, want the conclusion", first)
+		}
+	})
+	t.Run("count", func(t *testing.T) {
+		want := "10 benchmarks: 1 regressed, 1 improved, 4 unchanged, 1 new, 1 removed, 2 not judged."
+		if lines := strings.SplitN(report, "\n", 4); len(lines) < 3 || lines[2] != want {
+			t.Errorf("report starts %q, want the conclusion, a blank line and %q", lines, want)
 		}
 	})
 	t.Run("trees", func(t *testing.T) {
@@ -254,25 +260,89 @@ func TestIntervalsReadAsBenchstatShowsThem(t *testing.T) {
 	}
 }
 
-func TestConclusionLine(t *testing.T) {
+// twice is a group whose BenchmarkA-8 and BenchmarkB-8 both got twice as slow; everyMetric one whose
+// BenchmarkA-8 doubled in time, memory and allocations.
+var (
+	twice       = canned{base: samples(steady, another), head: samples(slower, bench{"BenchmarkB-8", 100, 0, 0})}
+	everyMetric = canned{base: samples(steady), head: samples(bench{"BenchmarkA-8", 200, 128, 2})}
+)
+
+func TestFirstLineIsTheConclusion(t *testing.T) {
 	t.Parallel()
-	twice := canned{base: samples(steady, another), head: samples(slower, bench{"BenchmarkB-8", 100, 0, 0})}
 	for _, c := range []struct {
 		name   string
 		passes []map[string]canned
 		want   string
 	}{
-		{"nothing measured", []map[string]canned{{}}, "**PASS**: nothing was measured."},
-		{"no regression", []map[string]canned{{"cpu": clean}}, "**PASS**: no confirmed regression."},
-		{"excluded", []map[string]canned{{"cpu": regressed}, {"cpu": clean}}, "**PASS**: no confirmed regression."},
-		{"two confirmed", []map[string]canned{{"cpu": twice}, {"cpu": twice}}, "**FAIL**: 2 confirmed regressions."},
+		{"nothing measured", []map[string]canned{{}}, "# Benchmark gate: PASS, nothing to compare"},
+		{"no regression", []map[string]canned{{"cpu": clean}}, "# Benchmark gate: PASS, no benchmark regressed"},
+		{"regression not confirmed", []map[string]canned{{"cpu": regressed}, {"cpu": clean}}, "# Benchmark gate: PASS, no benchmark regressed"},
+		{"one benchmark in every metric", []map[string]canned{{"cpu": everyMetric}, {"cpu": everyMetric}}, "# Benchmark gate: FAIL, 1 benchmark regressed"},
+		{"two benchmarks", []map[string]canned{{"cpu": twice}, {"cpu": twice}}, "# Benchmark gate: FAIL, 2 benchmarks regressed"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			f := &fake{passes: c.passes}
 			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			if first, _, _ := strings.Cut(o.report, "\n"); first != c.want {
+				t.Errorf("first line %q, want %q", first, c.want)
+			}
+		})
+	}
+}
+
+func TestCountSentenceCountsEachBenchmarkByOutcome(t *testing.T) {
+	t.Parallel()
+	better := bench{"BenchmarkA-8", 100, 32, 1}
+	slowerAndSmaller := canned{base: samples(steady), head: samples(bench{"BenchmarkA-8", 200, 32, 1})}
+	timeOnly := canned{base: strings.Repeat("pkg: example.com/fake\nBenchmarkA-8 1000 100 ns/op\n", 10), head: samples(steady)}
+	fewHeadSamples := canned{base: samples(steady), head: "pkg: example.com/fake\n" + strings.Repeat("BenchmarkA-8 1000 100 ns/op 64 B/op 1 allocs/op\n", 5)}
+	for _, c := range []struct {
+		name   string
+		passes []map[string]canned
+		edit   func(*Options)
+		want   string
+	}{
+		{"regressed in every metric", []map[string]canned{{"cpu": everyMetric}, {"cpu": everyMetric}}, nil, "1 benchmark: 1 regressed."},
+		{"regressed and improved", []map[string]canned{{"cpu": slowerAndSmaller}, {"cpu": slowerAndSmaller}}, nil, "1 benchmark: 1 regressed."},
+		{"improved and regressed unconfirmed", []map[string]canned{{"cpu": slowerAndSmaller}, {"cpu": {base: samples(steady), head: samples(better)}}}, nil, "1 benchmark: 1 improved."},
+		{"new in some metrics", []map[string]canned{{"cpu": timeOnly}}, nil, "1 benchmark: 1 unchanged."},
+		{"report only and too few samples", []map[string]canned{{"cpu": fewHeadSamples}}, func(o *Options) { o.Config.Groups[0].Thresholds = map[string]float64{"sec/op": 0.1} }, "1 benchmark: 1 not judged."},
+		{"unchanged", []map[string]canned{{"cpu": clean}}, nil, "2 benchmarks: 2 unchanged."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: c.passes}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t), func(o *Options) {
+				if c.edit != nil {
+					c.edit(o)
+				}
+			})
 			if lines := strings.SplitN(o.report, "\n", 4); len(lines) < 3 || lines[2] != c.want {
-				t.Errorf("report starts %q, want the title and %q", lines, c.want)
+				t.Errorf("report starts %q, want the conclusion, a blank line and %q", lines, c.want)
+			}
+		})
+	}
+}
+
+func TestNoComparisonSaysWhy(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name string
+		cpu  canned
+		want string
+	}{
+		{"identical test binaries", canned{}, "No benchmark was compared: base and head build identical test binaries."},
+		{"base without a package", canned{states: []sample.Status{{Package: "p", State: sample.BaseMissing}, {Package: "q", State: sample.Identical}}}, "No benchmark was compared: the groups below say why."},
+		{"measured without rows", canned{base: "PASS\n", head: "PASS\n", states: []sample.Status{{Package: "p", State: sample.Measured}, {Package: "q", State: sample.Identical}}}, "No benchmark was compared: the groups below say why."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: []map[string]canned{{"cpu": c.cpu}}}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			wantCode(t, o, 0)
+			if lines := strings.SplitN(o.report, "\n", 4); len(lines) < 3 || lines[2] != c.want {
+				t.Errorf("report starts %q, want the conclusion, a blank line and %q", lines, c.want)
 			}
 		})
 	}

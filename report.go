@@ -20,11 +20,20 @@ var reasons = map[sample.State]string{
 	sample.BaseFailed:  "base failed to build or run",
 }
 
+// outcomes are what can become of a benchmark, in the order the count sentence lists them.
+var outcomes = []string{"regressed", "improved", "unchanged", "new", "removed", "not judged"}
+
 // render is the Markdown report of res, a run of the gate under cfg as o asked for it.
 func render(o Options, cfg Config, res result) []byte {
 	var b strings.Builder
 	confirmed, excluded := res.split()
-	fmt.Fprintf(&b, "# Benchmark gate\n\n%s\n\n", conclusion(res, len(confirmed)))
+	total := make(map[string]int) // benchmarks by outcome
+	for _, g := range cfg.Groups {
+		for fate, n := range tally(g.Name, res.first.verdicts[g.Name].Rows, confirmed) {
+			total[fate] += n
+		}
+	}
+	headline(&b, total, res.first)
 	b.WriteString("## Confirmed regressions\n\n")
 	suspects(&b, cfg, confirmed)
 	b.WriteString("## Excluded after re-check\n\n")
@@ -56,18 +65,71 @@ func fold(b *strings.Builder, summary, md string) {
 	fmt.Fprintf(b, "<details>\n<summary>%s</summary>\n\n%s\n\n</details>\n\n", summary, strings.TrimRight(md, "\n"))
 }
 
-// conclusion is the report's verdict line.
-func conclusion(res result, confirmed int) string {
-	switch {
-	case confirmed == 1:
-		return "**FAIL**: 1 confirmed regression."
-	case confirmed > 1:
-		return fmt.Sprintf("**FAIL**: %d confirmed regressions.", confirmed)
-	case len(res.first.verdicts) == 0:
-		return "**PASS**: nothing was measured."
-	default:
-		return "**PASS**: no confirmed regression."
+// headline writes the report's conclusion line and count sentence from the benchmarks counted by outcome and the first pass.
+func headline(b *strings.Builder, counts map[string]int, first pass) {
+	benchmarks := func(n int) string {
+		if n == 1 {
+			return "1 benchmark"
+		}
+		return strconv.Itoa(n) + " benchmarks"
 	}
+	total := 0
+	var items []string
+	for _, fate := range outcomes {
+		if n := counts[fate]; n > 0 {
+			total += n
+			items = append(items, fmt.Sprintf("%d %s", n, fate))
+		}
+	}
+	switch {
+	case counts["regressed"] > 0:
+		fmt.Fprintf(b, "# Benchmark gate: FAIL, %s regressed\n\n", benchmarks(counts["regressed"]))
+	case total > 0:
+		b.WriteString("# Benchmark gate: PASS, no benchmark regressed\n\n")
+	default:
+		b.WriteString("# Benchmark gate: PASS, nothing to compare\n\n")
+	}
+	identical := !slices.ContainsFunc(first.Groups, func(g sample.GroupResult) bool {
+		return slices.ContainsFunc(g.Packages, func(s sample.Status) bool { return s.State != sample.Identical })
+	})
+	switch {
+	case total > 0:
+		fmt.Fprintf(b, "%s: %s.\n\n", benchmarks(total), strings.Join(items, ", "))
+	case identical:
+		b.WriteString("No benchmark was compared: base and head build identical test binaries.\n\n")
+	default:
+		b.WriteString("No benchmark was compared: the groups below say why.\n\n")
+	}
+}
+
+// tally counts group g's benchmarks in rows by outcome, given the suspects the re-check confirmed.
+func tally(g string, rows []verdict.Row, confirmed []suspect) map[string]int {
+	byBenchmark := make(map[verdict.Key][]verdict.Row) // keys without a metric
+	for _, r := range rows {
+		k := verdict.Key{Pkg: r.Pkg, Name: r.Name}
+		byBenchmark[k] = append(byBenchmark[k], r)
+	}
+	counts := make(map[string]int)
+	for k, benchRows := range byBenchmark {
+		every := func(classes ...verdict.Class) bool {
+			return !slices.ContainsFunc(benchRows, func(r verdict.Row) bool { return !slices.Contains(classes, r.Class) })
+		}
+		fate := "unchanged"
+		switch {
+		case slices.ContainsFunc(confirmed, func(s suspect) bool { return s.group == g && s.first.Pkg == k.Pkg && s.first.Name == k.Name }):
+			fate = "regressed"
+		case slices.ContainsFunc(benchRows, func(r verdict.Row) bool { return r.Class == verdict.Improvement }):
+			fate = "improved"
+		case every(verdict.New):
+			fate = "new"
+		case every(verdict.Removed):
+			fate = "removed"
+		case every(verdict.ReportOnly, verdict.TooFewSamples):
+			fate = "not judged"
+		}
+		counts[fate]++
+	}
+	return counts
 }
 
 func policy(b *strings.Builder, cfg Config) {
