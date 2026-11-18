@@ -86,7 +86,7 @@ func TestExportedAPIConfirmsAnExtraAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v\ndiagnostics:\n%s", err, &diagnostics)
 	}
-	if !regressed || !strings.Contains(string(report), "\n**FAIL**: 1 confirmed regression.\n") {
-		t.Errorf("regressed %v, report:\n%s\nwant one confirmed regression", regressed, report)
+	if !regressed || !strings.HasPrefix(string(report), "# Benchmark gate: FAIL, 1 benchmark regressed\n") {
+		t.Errorf("regressed %v, report:\n%s\nwant one benchmark regressed", regressed, report)
 	}
 }

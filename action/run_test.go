@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,9 +29,9 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// The stand-in gate's report, its one raw sample and its standard error.
+// The stand-in gate's default report, its one raw sample and its standard error.
 const (
-	standInReport = "# Benchmark gate\n\nstand-in report\n"
+	standInReport = "# Benchmark gate: FAIL, 1 benchmark regressed\n\nstand-in report\n"
 	standInSample = "BenchmarkStandIn 1 1 ns/op\n"
 	standInStderr = "benchgate: stand-in error\n\tsecond line\n"
 )
@@ -39,7 +41,7 @@ type invocation struct {
 	Base, Head, BaseLabel, HeadLabel, Config, Out, MeasureIdentical string
 }
 
-// standIn acts as the gate command about to exit with code: it records its flags as JSON in the file STAND_IN_RECORD names and writes standInStderr to standard error, and unless code says nothing was concluded it writes standInSample and standInReport into -out and the report to standard output.
+// standIn acts as the gate command about to exit with code: it records its flags as JSON in the file STAND_IN_RECORD names and writes standInStderr to standard error, and unless code says nothing was concluded it writes standInSample and the report STAND_IN_REPORT holds into -out and the report to standard output.
 func standIn(code int) error {
 	var o invocation
 	fs := flag.NewFlagSet("benchgate", flag.ContinueOnError)
@@ -73,14 +75,15 @@ func standIn(code int) error {
 	if err := os.WriteFile(filepath.Join(o.Out, "first", "g.base.txt"), []byte(standInSample), 0o644); err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(o.Out, "report.md"), []byte(standInReport), 0o644); err != nil {
+	report := os.Getenv("STAND_IN_REPORT")
+	if err := os.WriteFile(filepath.Join(o.Out, "report.md"), []byte(report), 0o644); err != nil {
 		return err
 	}
-	_, err := os.Stdout.WriteString(standInReport)
+	_, err := os.Stdout.WriteString(report)
 	return err
 }
 
-// gateStep adds to env what run.sh reads to run the stand-in gate, which exits with code, on the checkouts base and head.
+// gateStep adds to env what run.sh reads to run the stand-in gate, which exits with code and reports standInReport, on the checkouts base and head.
 func gateStep(t *testing.T, env map[string]string, code int, base, head string) {
 	t.Helper()
 	gate, err := os.Executable()
@@ -89,7 +92,7 @@ func gateStep(t *testing.T, env map[string]string, code int, base, head string) 
 	}
 	env["BENCHGATE"], env["BASE_TREE"], env["HEAD_TREE"], env["MEASURE_IDENTICAL"] = gate, base, head, ""
 	env["RESULTS"] = filepath.Join(t.TempDir(), "results")
-	env["STAND_IN_EXIT"], env["STAND_IN_RECORD"] = strconv.Itoa(code), filepath.Join(t.TempDir(), "record.json")
+	env["STAND_IN_EXIT"], env["STAND_IN_RECORD"], env["STAND_IN_REPORT"] = strconv.Itoa(code), filepath.Join(t.TempDir(), "record.json"), standInReport
 }
 
 // gating checks out the base and the merge commit of a pull request and returns run.sh's environment for the stand-in gate exiting with code on them, with the two commits.
@@ -148,7 +151,7 @@ func TestResultsHoldTheReportTheSamplesAndTheGatesErrors(t *testing.T) {
 
 func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
 	t.Parallel()
-	fail := "# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n    benchgate: stand-in error\n    \tsecond line\n"
+	fail := "# Benchmark gate: FAIL, nothing to conclude\n\nThe gate exited %d:\n\n    benchgate: stand-in error\n    \tsecond line\n"
 	for _, c := range []struct {
 		code    int
 		summary string
@@ -166,6 +169,88 @@ func TestSummaryAndExitCodeFollowTheGate(t *testing.T) {
 				t.Errorf("step exited %d with the summary %q, want %d with %q\n%s", s.code, s.summary, c.code, c.summary, s.log)
 			}
 		})
+	}
+}
+
+func TestOutputsFollowTheGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		code       int
+		conclusion string
+		reported   bool
+	}{
+		{0, "pass", true},
+		{1, "regression", true},
+		{2, "error", false},
+		{3, "error", false},
+	} {
+		t.Run(fmt.Sprint("gate exiting ", c.code), func(t *testing.T) {
+			t.Parallel()
+			env, _, _ := gating(t, c.code)
+			s := run(t, "run.sh", t.TempDir(), env)
+			want := map[string]string{"conclusion": c.conclusion, "report": ""}
+			if c.reported {
+				want["report"] = env["RESULTS"] + "/out/report.md"
+			}
+			if !maps.Equal(s.outputs, want) {
+				t.Errorf("outputs %q, want %q\n%s", s.outputs, want, s.log)
+			}
+		})
+	}
+}
+
+func TestAnnotationsFollowTheGate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		code       int
+		annotation string
+	}{
+		{0, ""},
+		{1, "::error::Benchmark gate: FAIL, 1 benchmark regressed\n"},
+		{2, "::error::Benchmark gate: FAIL, nothing to conclude (exit 2)\n"},
+		{3, "::error::Benchmark gate: FAIL, nothing to conclude (exit 3)\n"},
+	} {
+		t.Run(fmt.Sprint("gate exiting ", c.code), func(t *testing.T) {
+			t.Parallel()
+			env, _, _ := gating(t, c.code)
+			s := run(t, "run.sh", t.TempDir(), env)
+			if _, after, ok := strings.Cut(s.log, standInStderr); !ok || after != c.annotation {
+				t.Errorf("the log goes on after the gate's errors with %q, want %q\n%s", after, c.annotation, s.log)
+			}
+		})
+	}
+}
+
+func TestRegressionAnnotationIsTheReportsFirstLineAlone(t *testing.T) {
+	t.Parallel()
+	for _, title := range []string{"Benchmark gate: FAIL, 2 benchmarks regressed", "Benchmark gate: FAIL, 40312 benchmarks regressed"} {
+		t.Run(title, func(t *testing.T) {
+			t.Parallel()
+			env, _, _ := gating(t, 1)
+			// A second conclusion line shows whether any line but the first is read.
+			env["STAND_IN_REPORT"] = "# " + title + "\n\n# Benchmark gate: FAIL, 3 benchmarks regressed\n"
+			s := run(t, "run.sh", t.TempDir(), env)
+			if _, after, ok := strings.Cut(s.log, standInStderr); !ok || after != "::error::"+title+"\n" {
+				t.Errorf("the log goes on after the gate's errors with %q, want only the annotation of %q\n%s", after, title, s.log)
+			}
+		})
+	}
+}
+
+func TestActionOutputsAreTheGateSteps(t *testing.T) {
+	t.Parallel()
+	action, err := os.ReadFile("../action.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^      id: gate\n(?:      .*\n)*?      run: bash "\$GITHUB_ACTION_PATH/action/run\.sh"$`).Match(action) {
+		t.Error("action.yml has no step gate running run.sh")
+	}
+	for _, name := range []string{"conclusion", "report"} {
+		declared := `(?m)^outputs:\n(?:  .*\n)*?  ` + name + `:\n(?:    .*\n)*?    value: \$\{\{ steps\.gate\.outputs\.` + name + ` \}\}$`
+		if !regexp.MustCompile(declared).Match(action) {
+			t.Errorf("action.yml declares no output %s taken from the step gate", name)
+		}
 	}
 }
 

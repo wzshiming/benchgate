@@ -177,13 +177,13 @@ var (
 	clean     = canned{base: samples(steady, another), head: samples(steady, another)}
 )
 
-func TestSuspectThatDoesNotHoldOnRecheckIsExcluded(t *testing.T) {
+func TestSuspectThatDoesNotHoldOnRecheckIsNotConfirmed(t *testing.T) {
 	t.Parallel()
 	f := &fake{passes: []map[string]canned{{"cpu": regressed}, {"cpu": clean}}}
 	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
 	wantCode(t, o, 0)
-	if excluded := rows(section(t, o.report, "## Excluded after re-check")); !hasRow(excluded, "cpu", "BenchmarkA-8", "sec/op") {
-		t.Errorf("excluded after re-check %q, want the sec/op row of BenchmarkA-8", excluded)
+	if notConfirmed := rows(section(t, o.report, "## Not confirmed")); !hasRow(notConfirmed, "fake · A", "time") {
+		t.Errorf("not confirmed %q, want the time row of BenchmarkA-8", notConfirmed)
 	}
 }
 
@@ -192,8 +192,8 @@ func TestSuspectMustRegressInTheSameMetricOnRecheck(t *testing.T) {
 	f := &fake{passes: []map[string]canned{{"cpu": regressed}, {"cpu": {base: samples(steady, another), head: samples(bigger, another)}}}}
 	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
 	wantCode(t, o, 0)
-	if excluded := rows(section(t, o.report, "## Excluded after re-check")); !hasRow(excluded, "cpu", "BenchmarkA-8", "sec/op") {
-		t.Errorf("excluded after re-check %q, want the sec/op row of BenchmarkA-8", excluded)
+	if notConfirmed := rows(section(t, o.report, "## Not confirmed")); !hasRow(notConfirmed, "fake · A", "time") {
+		t.Errorf("not confirmed %q, want the time row of BenchmarkA-8", notConfirmed)
 	}
 }
 
@@ -323,7 +323,7 @@ func TestBaseFailureReasonGoesToStderrNotTheReport(t *testing.T) {
 	if strings.Contains(o.report, "boom") || strings.Contains(o.report, "/home/runner") {
 		t.Errorf("report holds the reason:\n%s", o.report)
 	}
-	if notMeasured := rows(section(t, o.report, "## Not measured")); !hasRow(notMeasured, "cpu", "p", "base failed to build or run") {
+	if notMeasured := rows(section(t, folded(t, o.report, "How this was measured"), "### Not measured")); !hasRow(notMeasured, "cpu", "p", "base failed to build or run") {
 		t.Errorf("not measured %q, want package p for its failing base", notMeasured)
 	}
 }

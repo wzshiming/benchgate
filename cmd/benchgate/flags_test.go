@@ -19,9 +19,9 @@ type fake struct {
 
 func (f *fake) run(_ context.Context, o benchgate.Options) ([]byte, bool, error) {
 	f.requests = append(f.requests, o)
-	report := "# Benchmark gate\n\n"
+	report := "# Benchmark gate: PASS, nothing to compare\n\n"
 	if o.Reproduce != "" {
-		report += "## Reproduce\n\n" + o.Reproduce
+		report += "### Reproduce\n\n" + o.Reproduce
 	}
 	return []byte(report), false, nil
 }

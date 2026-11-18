@@ -49,6 +49,21 @@ row on each side, at least 10 and `minSamples` when judged; and `thresholds`,
 from `sec/op`, `B/op` or `allocs/op` to the relative increase a regression must
 exceed (0.1 for 10%), or `"reportOnly": true` to compare without judging.
 
+## Reading the report
+
+The title is the conclusion: `Benchmark gate: FAIL, N benchmarks regressed`
+(`1 benchmark` for one), `Benchmark gate: PASS, no benchmark regressed` or
+`Benchmark gate: PASS, nothing to compare`. `Regressions`, `Not confirmed` and
+`Improvements` list rows that regressed in both measurements, in the first only,
+and that improved by more than the threshold. `Groups` gives each group's
+overall change, the geometric mean as in benchstat's geomean. Folded,
+`All results` lists every row with its `Result`: `regression, confirmed` or
+`regression, not confirmed`, `improved`, `within limit` (significant, inside the
+threshold), `no change (within noise)` (not significant) or `too noisy to tell`
+(and a side's ± over the threshold), `too few samples`, `new` or `removed` (one
+side only), `not judged` (no threshold); `How this was measured` the trees,
+environment, policy, unmeasured packages, load per round and `Reproduce` last.
+
 ## GitHub Action
 
 One step gates a pull request on a Linux or macOS runner; the job needs no
@@ -80,15 +95,20 @@ changes the configuration or the calling workflow. Both trees, checked out under
 `.benchgate/`, are built with the Go, 1.21 or newer, named by the head tree's
 `go-version-file` (default `go.mod`), and the gate from the Action's own source.
 `artifact-name` defaults to `benchgate-<job>-<matrix index>-<run attempt>`.
+The output `conclusion` is `pass`, `regression` or `error` as the gate exited 0,
+1 or otherwise, and empty if the gate did not run; `report` is the path of
+`report.md` on the runner, empty unless the gate exited 0 or 1.
 [gate.yml](.github/workflows/gate.yml) gates this repository.
 
 ## When the check is red
 
-The job summary is the report, the confirmed regressions with both samplings'
-numbers first, or the gate's error if it concludes nothing; the artifact holds
-the report, the raw samples and the gate's standard error. To reproduce the
-run, follow the Reproduce section that ends the report on worktrees of the two
-commits it names; it installs `@latest` because the Action builds the gate
+The job summary is the report, its title the conclusion and `Regressions` first,
+each row with its change in both measurements and its `Limit`, or the gate's
+error under `Benchmark gate: FAIL, nothing to conclude`. An error annotation on
+the check repeats the title, adding `(exit <code>)` to the latter. The artifact
+holds the report, the raw samples and the gate's standard error. To reproduce
+the run, follow `Reproduce`, at the end of `How this was measured`, on worktrees
+of the two commits it names; it installs `@latest` as the Action builds the gate
 without a version, so install the gate at the Action's commit instead. There is
 no override: the check stays red, and a maintainer decides whether to merge.
 

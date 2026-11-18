@@ -205,7 +205,7 @@ func wantCode(t *testing.T, o outcome, want int) {
 	}
 }
 
-// section is the part of report under heading, up to the next heading of its level or above.
+// section is the part of report under heading, up to the next heading of its level or above or a details tag.
 func section(t *testing.T, report, heading string) string {
 	t.Helper()
 	_, rest, ok := strings.Cut(report, "\n"+heading+"\n")
@@ -218,9 +218,23 @@ func section(t *testing.T, report, heading string) string {
 		if n := len(line) - len(strings.TrimLeft(line, "#")); n > 0 && n <= level && strings.HasPrefix(line[n:], " ") {
 			return rest[:offset]
 		}
+		if line == "<details>\n" || line == "</details>\n" {
+			return rest[:offset]
+		}
 		offset += len(line)
 	}
 	return rest
+}
+
+// folded is the part of report folded under summary, from the end of the summary line to the closing tag.
+func folded(t *testing.T, report, summary string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(report, "<details>\n<summary>"+summary+"</summary>\n")
+	if !ok {
+		t.Fatalf("no block %q in the report:\n%s", summary, report)
+	}
+	md, _, _ := strings.Cut(rest, "</details>")
+	return md
 }
 
 // rows are the cells of the table rows in s, without headers and separators.
@@ -264,7 +278,7 @@ func TestIdenticalTreesPassUnmeasured(t *testing.T) {
 	t.Parallel()
 	o := process(t, buildCommand(t), tree(t, nil), tree(t, nil), writeConfig(t, judgeAll))
 	wantCode(t, o, 0)
-	notMeasured := rows(section(t, o.report, "## Not measured"))
+	notMeasured := rows(section(t, folded(t, o.report, "How this was measured"), "### Not measured"))
 	for _, pkg := range []string{"a", "b"} {
 		if !hasRow(notMeasured, pkg, "identical test binaries") {
 			t.Errorf("not measured %q, want package %s for identical test binaries", notMeasured, pkg)
@@ -283,16 +297,16 @@ func TestIdenticalTreesMeasuredAnywayPass(t *testing.T) {
 func TestSlowerBenchmarkIsTheOnlyConfirmedRegression(t *testing.T) {
 	o := process(t, buildCommand(t), tree(t, nil), tree(t, slowWork), writeConfig(t, judgeAll))
 	wantCode(t, o, 1)
-	if confirmed := rows(section(t, o.report, "## Confirmed regressions")); len(confirmed) != 1 || !hasRow(confirmed, "BenchmarkWork"+procs(), "sec/op") {
-		t.Errorf("confirmed regressions %q, want the sec/op row of BenchmarkWork%s alone", confirmed, procs())
+	if regressions := rows(section(t, o.report, "## Regressions")); len(regressions) != 1 || !hasRow(regressions, "a · Work", "time") {
+		t.Errorf("regressions %q, want the time row of BenchmarkWork alone", regressions)
 	}
 }
 
 func TestExtraAllocationFailsOnAllocs(t *testing.T) {
 	o := process(t, buildCommand(t), tree(t, nil), tree(t, allocWork), writeConfig(t, `{"sec/op": 9, "allocs/op": 0.5}`))
 	wantCode(t, o, 1)
-	if confirmed := rows(section(t, o.report, "## Confirmed regressions")); len(confirmed) != 1 || !hasRow(confirmed, "BenchmarkWork"+procs(), "allocs/op") {
-		t.Errorf("confirmed regressions %q, want the allocs/op row of BenchmarkWork%s alone", confirmed, procs())
+	if regressions := rows(section(t, o.report, "## Regressions")); len(regressions) != 1 || !hasRow(regressions, "a · Work", "allocations") {
+		t.Errorf("regressions %q, want the allocations row of BenchmarkWork alone", regressions)
 	}
 }
 
@@ -326,7 +340,7 @@ func TestBaseWithoutAPackagePassesAndSaysSo(t *testing.T) {
 	t.Parallel()
 	o := process(t, buildCommand(t), tree(t, withoutB), tree(t, nil), writeConfig(t, judgeAll))
 	wantCode(t, o, 0)
-	if notMeasured := rows(section(t, o.report, "## Not measured")); !hasRow(notMeasured, "b", "base has no such package") {
+	if notMeasured := rows(section(t, folded(t, o.report, "How this was measured"), "### Not measured")); !hasRow(notMeasured, "b", "base has no such package") {
 		t.Errorf("not measured %q, want package b for a base without it", notMeasured)
 	}
 }
@@ -352,7 +366,7 @@ func TestBuiltCommandExitsTwoUnlessOnlyTheBaseFails(t *testing.T) {
 				t.Errorf("stderr %q does not name the head side of package b", o.stderr)
 			}
 			if c.code == 0 {
-				if notMeasured := rows(section(t, o.report, "## Not measured")); !hasRow(notMeasured, "b", "base failed to build or run") {
+				if notMeasured := rows(section(t, folded(t, o.report, "How this was measured"), "### Not measured")); !hasRow(notMeasured, "b", "base failed to build or run") {
 					t.Errorf("not measured %q, want package b for its failing base", notMeasured)
 				}
 				if !strings.Contains(o.stderr, "failed on purpose") {

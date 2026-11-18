@@ -41,12 +41,14 @@ func TestMatchesBenchstat(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows := make(map[verdict.Key]verdict.Row)
+	pkgRows := make(map[string][]verdict.Row) // benchstat's geomean row covers one package's rows of a unit
 	for _, r := range res.Rows {
 		rows[r.Key] = r
+		pkgRows[r.Pkg] = append(pkgRows[r.Pkg], r)
 	}
 
 	var pkg, unit string
-	seen := 0
+	seen, tables, geomeans := 0, 0, 0
 	for _, rec := range benchstat(t, base, head) {
 		switch {
 		case len(rec) == 1:
@@ -56,8 +58,18 @@ func TestMatchesBenchstat(t *testing.T) {
 		case rec[0] == "":
 			if rec[2] == "CI" {
 				unit = rec[1]
+				tables++
 			}
 		case rec[0] == "geomean":
+			geomeans++
+			delta, ok := verdict.Result{Rows: pkgRows[pkg]}.Overall(unit)
+			got := "?"
+			if ok {
+				got = fmt.Sprintf("%+.2f%%", delta*100)
+			}
+			if got != rec[5] {
+				t.Errorf("%s %s: overall %s, benchstat's geomean %s", pkg, unit, got, rec[5])
+			}
 		default:
 			k := verdict.Key{Pkg: pkg, Name: "Benchmark" + rec[0], Metric: unit}
 			row, ok := rows[k]
@@ -75,6 +87,9 @@ func TestMatchesBenchstat(t *testing.T) {
 	}
 	if seen != len(rows) {
 		t.Errorf("benchstat shows %d rows, Compare returned %d", seen, len(rows))
+	}
+	if geomeans != tables {
+		t.Errorf("benchstat shows %d tables, %d geomean rows", tables, geomeans)
 	}
 }
 
