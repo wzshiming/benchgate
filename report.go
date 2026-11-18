@@ -407,12 +407,8 @@ func (o Options) inOut(path string) string {
 // cellEscaper keeps a cell from splitting its row or opening or closing HTML such as a folded block.
 var cellEscaper = strings.NewReplacer("|", `\|`, "<", "&lt;")
 
-// table writes a Markdown table of header and rows, or "None." without rows.
+// table writes a Markdown table of header and rows.
 func table(b *strings.Builder, header []string, rows [][]string) {
-	if len(rows) == 0 {
-		b.WriteString("None.\n\n")
-		return
-	}
 	line := func(cells []string) {
 		escaped := make([]string, len(cells))
 		for i, c := range cells {
