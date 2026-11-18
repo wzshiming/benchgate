@@ -41,10 +41,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: ./
+      - id: gate
+        uses: ./
         with:
           config: benchgate.json
           # A push compares master before and after it; a pull request gives no refs, so its merge commit is compared with the first parent.
           base: ${{ github.event_name == 'push' && github.event.before || inputs.base }}
           head: ${{ github.event_name == 'push' && github.sha || inputs.head }}
           measure-identical: ${{ inputs.measure-identical }}
+      - name: Print the gate outputs
+        if: always()
+        run: |
+          echo "conclusion: ${{ steps.gate.outputs.conclusion }}"
+          echo "report: ${{ steps.gate.outputs.report }}"

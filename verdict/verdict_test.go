@@ -389,8 +389,10 @@ func BenchmarkCompare(b *testing.B) {
 	base, head := write(b, ab)
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := verdict.Compare(base, head, gate); err != nil {
-			b.Fatal(err)
+		for range 20 {
+			if _, err := verdict.Compare(base, head, gate); err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 }
