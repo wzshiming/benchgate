@@ -10,8 +10,9 @@ code=0
 	-config "$HEAD_TREE/$INPUT_CONFIG" -out "$RESULTS/out" ${MEASURE_IDENTICAL:+"-measure-identical=$MEASURE_IDENTICAL"} \
 	2>"$RESULTS/stderr.txt" || code=$?
 cat "$RESULTS/stderr.txt" >&2
+report=$RESULTS/out/report.md
 if ((code <= 1)); then
-	cat "$RESULTS/out/report.md" >>"$GITHUB_STEP_SUMMARY"
+	cat "$report" >>"$GITHUB_STEP_SUMMARY"
 else
 	{
 		printf '# Benchmark gate\n\n**FAIL**: nothing to conclude, the gate exited %d:\n\n' "$code"
