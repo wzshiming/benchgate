@@ -331,6 +331,7 @@ func TestCountSentenceCountsEachBenchmarkByOutcome(t *testing.T) {
 		{"new in some metrics", []map[string]canned{{"cpu": timeOnly}}, nil, "1 benchmark: 1 unchanged."},
 		{"report only and too few samples", []map[string]canned{{"cpu": fewHeadSamples}}, func(o *Options) { o.Config.Groups[0].Thresholds = map[string]float64{"sec/op": 0.1} }, "1 benchmark: 1 not judged."},
 		{"unchanged", []map[string]canned{{"cpu": clean}}, nil, "2 benchmarks: 2 unchanged."},
+		{"one benchmark in two groups", []map[string]canned{{"cpu": everyMetric, "io": everyMetric}, {"cpu": everyMetric}}, nil, "2 benchmarks: 1 regressed, 1 not judged."},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
