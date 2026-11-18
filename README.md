@@ -99,11 +99,13 @@ changes the configuration or the calling workflow. Both trees, checked out under
 
 ## When the check is red
 
-The job summary is the report, the confirmed regressions with both samplings'
-numbers first, or the gate's error if it concludes nothing; the artifact holds
-the report, the raw samples and the gate's standard error. To reproduce the
-run, follow the Reproduce section that ends the report on worktrees of the two
-commits it names; it installs `@latest` because the Action builds the gate
+The job summary is the report, its title the conclusion and `Regressions` first,
+each row with its change in both measurements and its `Limit`, or the gate's
+error under `Benchmark gate: FAIL, nothing to conclude`. An error annotation on
+the check repeats the title, adding `(exit <code>)` to the latter. The artifact
+holds the report, the raw samples and the gate's standard error. To reproduce
+the run, follow `Reproduce`, at the end of `How this was measured`, on worktrees
+of the two commits it names; it installs `@latest` as the Action builds the gate
 without a version, so install the gate at the Action's commit instead. There is
 no override: the check stays red, and a maintainer decides whether to merge.
 
