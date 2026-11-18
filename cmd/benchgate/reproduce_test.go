@@ -47,7 +47,7 @@ func TestReportHasEverySection(t *testing.T) {
 	report := runFull(t).report
 
 	t.Run("reproduce", func(t *testing.T) {
-		got := section(t, report, "## Reproduce")
+		got := section(t, report, "### Reproduce")
 		for _, want := range []string{
 			"`go install github.com/wzshiming/benchgate/cmd/benchgate@", // at the version of this test binary
 			"`benchgate -base <base> -head <head> -base-label abc1234 -head-label 'def5678 (merge)' -config <head>/benchgate.json -out <out>`",
@@ -82,7 +82,7 @@ func TestReproduceRepeatsTheOverridesAndHidesPaths(t *testing.T) {
 	t.Parallel()
 	r := runFull(t, "-groups", "cpu,mem", "-measure-identical=false")
 	want := "`benchgate -base <base> -head <head> -base-label abc1234 -head-label 'def5678 (merge)' -config <head>/benchgate.json -groups cpu,mem -measure-identical=false -out <out>`"
-	if got := section(t, r.report, "## Reproduce"); !strings.Contains(got, want) {
+	if got := section(t, r.report, "### Reproduce"); !strings.Contains(got, want) {
 		t.Errorf("reproduce %q does not hold %s", got, want)
 	}
 
@@ -93,7 +93,7 @@ func TestReproduceRepeatsTheOverridesAndHidesPaths(t *testing.T) {
 		"-config", fakeConfig(t), "-out", filepath.Join(t.TempDir(), "out"),
 	}, &stdout, &bytes.Buffer{}, f.run)
 	want = "-base-label 'it'\\''s' -head-label h -config <config> -out <out>`"
-	if got := section(t, stdout.String(), "## Reproduce"); !strings.Contains(got, want) {
+	if got := section(t, stdout.String(), "### Reproduce"); !strings.Contains(got, want) {
 		t.Errorf("reproduce %q does not hold %s", got, want)
 	}
 }
