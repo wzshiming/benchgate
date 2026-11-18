@@ -49,6 +49,21 @@ row on each side, at least 10 and `minSamples` when judged; and `thresholds`,
 from `sec/op`, `B/op` or `allocs/op` to the relative increase a regression must
 exceed (0.1 for 10%), or `"reportOnly": true` to compare without judging.
 
+## Reading the report
+
+The title is the conclusion: `Benchmark gate: FAIL, N benchmarks regressed`
+(`1 benchmark` for one), `Benchmark gate: PASS, no benchmark regressed` or
+`Benchmark gate: PASS, nothing to compare`. `Regressions`, `Not confirmed` and
+`Improvements` list rows that regressed in both measurements, in the first only,
+and that improved by more than the threshold. `Groups` gives each group's
+overall change, the geometric mean as in benchstat's geomean. Folded,
+`All results` lists every row with its `Result`: `regression, confirmed` or
+`regression, not confirmed`, `improved`, `within limit` (significant, inside the
+threshold), `no change (within noise)` (not significant) or `too noisy to tell`
+(and a side's ± over the threshold), `too few samples`, `new` or `removed` (one
+side only), `not judged` (no threshold); `How this was measured` the trees,
+environment, policy, unmeasured packages, load per round and `Reproduce` last.
+
 ## GitHub Action
 
 One step gates a pull request on a Linux or macOS runner; the job needs no
