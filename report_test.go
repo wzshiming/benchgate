@@ -282,10 +282,10 @@ func TestIntervalsReadAsBenchstatShowsThem(t *testing.T) {
 	}
 }
 
-// twice is a group whose BenchmarkA-8 and BenchmarkB-8 both got twice as slow; everyMetric one whose
-// BenchmarkA-8 doubled in time, memory and allocations.
 var (
-	twice       = canned{base: samples(steady, another), head: samples(slower, bench{"BenchmarkB-8", 100, 0, 0})}
+	// twice is a group whose BenchmarkA-8 and BenchmarkB-8 both got twice as slow.
+	twice = canned{base: samples(steady, another), head: samples(slower, bench{"BenchmarkB-8", 100, 0, 0})}
+	// everyMetric is a group whose BenchmarkA-8 doubled in time, memory and allocations.
 	everyMetric = canned{base: samples(steady), head: samples(bench{"BenchmarkA-8", 200, 128, 2})}
 )
 
