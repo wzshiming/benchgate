@@ -36,9 +36,11 @@ var metricWords = map[string]struct{ name, up, down string }{
 func render(o Options, cfg Config, res result) []byte {
 	var b strings.Builder
 	confirmed, excluded := res.split()
-	total := make(map[string]int) // benchmarks by outcome
+	counts := make(map[string]map[string]int) // benchmarks by group, then outcome
+	total := make(map[string]int)             // benchmarks by outcome
 	for _, g := range cfg.Groups {
-		for fate, n := range tally(g.Name, res.first.verdicts[g.Name].Rows, confirmed) {
+		counts[g.Name] = tally(g.Name, res.first.verdicts[g.Name].Rows, confirmed)
+		for fate, n := range counts[g.Name] {
 			total[fate] += n
 		}
 	}
@@ -47,6 +49,7 @@ func render(o Options, cfg Config, res result) []byte {
 	suspects(&b, cfg, "Not confirmed", "Over the limit in the first measurement only; these do not fail the gate.", excluded,
 		func(r verdict.Row) string { return cmp.Or(plain(r, false), "not measured") })
 	improvements(&b, cfg, res)
+	groups(&b, cfg, res.first, counts)
 	if all := comparison(o, cfg, res, confirmed); all != "" {
 		fold(&b, "All results", all)
 	}
@@ -189,6 +192,66 @@ func improvements(b *strings.Builder, cfg Config, res result) {
 		rows = append(rows, changeCells(r))
 	}
 	part(b, "Improvements", "Better by more than the limit; measured once.", []string{"Benchmark", "Metric", "Base", "Head", "Change"}, rows)
+}
+
+// groups writes the Groups part from the first pass and each group's benchmarks counted by outcome, judged groups first.
+func groups(b *strings.Builder, cfg Config, first pass, counts map[string]map[string]int) {
+	header := []string{"Group", "Benchmarks"}
+	for _, m := range judgedMetrics {
+		header = append(header, metricWords[m].name)
+	}
+	var rows [][]string
+	for _, g := range judgedFirst(cfg.Groups) {
+		n := 0
+		for _, c := range counts[g.Name] {
+			n += c
+		}
+		row := []string{g.Name, strconv.Itoa(n)}
+		for _, m := range judgedMetrics {
+			overall := ""
+			if d, ok := first.verdicts[g.Name].Overall(m); ok {
+				overall = change(d)
+			}
+			row = append(row, overall)
+		}
+		rows = append(rows, append(row, groupResult(g, first, counts[g.Name]["regressed"])))
+	}
+	part(b, "Groups", "The time, memory and allocations columns are each group's overall change, the geometric mean over its benchmarks.",
+		append(header, "Result"), rows)
+}
+
+// groupResult is group g's Result cell, from its packages in the first pass and how many of its benchmarks regressed.
+func groupResult(g Group, first pass, regressed int) string {
+	var packages []sample.Status
+	for _, gr := range first.Groups {
+		if gr.Name == g.Name {
+			packages = gr.Packages
+		}
+	}
+	var why []string
+	unmeasured := 0
+	for _, s := range packages {
+		if s.State != sample.Measured {
+			unmeasured++
+			if !slices.Contains(why, reasons[s.State]) {
+				why = append(why, reasons[s.State])
+			}
+		}
+	}
+	if unmeasured == len(packages) {
+		return "not measured: " + strings.Join(why, ", ")
+	}
+	status := "no regression"
+	switch {
+	case g.ReportOnly:
+		status = "not judged"
+	case regressed > 0:
+		status = fmt.Sprintf("%d regressed", regressed)
+	}
+	if unmeasured > 0 {
+		status += fmt.Sprintf("; %d of %d packages not measured", unmeasured, len(packages))
+	}
+	return status
 }
 
 // part writes a level-2 heading, intro and a table of header and rows, or nothing without rows.

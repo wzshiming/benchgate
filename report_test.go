@@ -139,7 +139,7 @@ func TestReportHasEverySection(t *testing.T) {
 		}
 	})
 	t.Run("parts", func(t *testing.T) {
-		want := []string{"## Regressions", "## Not confirmed", "## Improvements", "All results", "How this was measured"}
+		want := []string{"## Regressions", "## Not confirmed", "## Improvements", "## Groups", "All results", "How this was measured"}
 		if got := outline(report); !slices.Equal(got, want) {
 			t.Errorf("parts %q, want %q", got, want)
 		}
@@ -157,6 +157,13 @@ func TestReportHasEverySection(t *testing.T) {
 			}},
 		{"## Improvements", "Better by more than the limit; measured once.", "| Benchmark | Metric | Base | Head | Change |",
 			[][]string{{"fake · F", "time", "100ns", "50ns", "2.0× faster"}}},
+		{"## Groups", "The time, memory and allocations columns are each group's overall change, the geometric mean over its benchmarks.",
+			"| Group | Benchmarks | time | memory | allocations | Result |",
+			[][]string{
+				{"cpu", "8", "+13.16%", "+0.00%", "+0.00%", "1 regressed; 3 of 4 packages not measured"},
+				{"mem", "1", "+0.00%", "+100.00%", "+0.00%", "no regression"},
+				{"io", "1", "+100.00%", "+0.00%", "+0.00%", "not judged"},
+			}},
 	} {
 		t.Run(strings.ToLower(strings.TrimPrefix(p.heading, "## ")), func(t *testing.T) {
 			s := section(t, report, p.heading)
@@ -597,8 +604,8 @@ func TestReportLeavesOutPartsWithoutContent(t *testing.T) {
 		passes []map[string]canned
 		want   []string
 	}{
-		{"nothing compared", []map[string]canned{{}}, []string{"How this was measured"}},
-		{"nothing changed", []map[string]canned{{"cpu": clean}}, []string{"All results", "How this was measured"}},
+		{"nothing compared", []map[string]canned{{}}, []string{"## Groups", "How this was measured"}},
+		{"nothing changed", []map[string]canned{{"cpu": clean}}, []string{"## Groups", "All results", "How this was measured"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -607,6 +614,46 @@ func TestReportLeavesOutPartsWithoutContent(t *testing.T) {
 			wantCode(t, o, 0)
 			if got := outline(o.report); !slices.Equal(got, c.want) {
 				t.Errorf("parts %q, want %q:\n%s", got, c.want, o.report)
+			}
+		})
+	}
+}
+
+func TestGroupsSayHowEachGroupEnded(t *testing.T) {
+	t.Parallel()
+	notMeasured := func(states ...sample.State) canned {
+		return canned{states: []sample.Status{{Package: "p", State: states[0]}, {Package: "q", State: states[1]}}}
+	}
+	partly := canned{base: clean.base, head: clean.head, states: []sample.Status{{Package: "p", State: sample.Measured}, {Package: "q", State: sample.Identical}}}
+	zeroBase := canned{base: samples(bench{"BenchmarkD-8", 100, 0, 1}), head: samples(bench{"BenchmarkD-8", 100, 64, 1})}
+	cpuIdentical := []string{"cpu", "0", "", "", "", "not measured: identical test binaries"}
+	ioIdentical := []string{"io", "0", "", "", "", "not measured: identical test binaries"}
+	for _, c := range []struct {
+		name   string
+		passes []map[string]canned
+		want   [][]string
+	}{
+		{"one regressed", []map[string]canned{{"cpu": regressed}, {"cpu": regressed}},
+			[][]string{{"cpu", "2", "+41.42%", "+0.00%", "+0.00%", "1 regressed"}, ioIdentical}},
+		{"two regressed", []map[string]canned{{"cpu": twice}, {"cpu": twice}},
+			[][]string{{"cpu", "2", "+100.00%", "+0.00%", "+0.00%", "2 regressed"}, ioIdentical}},
+		{"partly measured", []map[string]canned{{"cpu": partly}},
+			[][]string{{"cpu", "2", "+0.00%", "+0.00%", "+0.00%", "no regression; 1 of 2 packages not measured"}, ioIdentical}},
+		{"report only", []map[string]canned{{"io": clean}},
+			[][]string{cpuIdentical, {"io", "2", "+0.00%", "+0.00%", "+0.00%", "not judged"}}},
+		{"not measured for two reasons", []map[string]canned{{"cpu": notMeasured(sample.BaseFailed, sample.BaseMissing)}},
+			[][]string{{"cpu", "0", "", "", "", "not measured: base failed to build or run, base has no such package"}, ioIdentical}},
+		{"not measured twice for one reason", []map[string]canned{{"cpu": notMeasured(sample.BaseFailed, sample.BaseFailed)}},
+			[][]string{{"cpu", "0", "", "", "", "not measured: base failed to build or run"}, ioIdentical}},
+		{"zero on one side", []map[string]canned{{"io": zeroBase}},
+			[][]string{cpuIdentical, {"io", "1", "+0.00%", "", "+0.00%", "not judged"}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := &fake{passes: c.passes}
+			o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+			if got := rows(section(t, o.report, "## Groups")); !slices.EqualFunc(got, c.want, slices.Equal) {
+				t.Errorf("groups %q, want %q", got, c.want)
 			}
 		})
 	}
