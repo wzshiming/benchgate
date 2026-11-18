@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/aclements/go-moremath/stats"
 	"golang.org/x/perf/benchfmt"
 	"golang.org/x/perf/benchmath"
 )
@@ -103,6 +104,29 @@ func Compare(basePath, headPath string, p Policy) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// Overall is metric's change across the rows on both sides as benchstat's geomean row; ok is false where that row shows ?.
+func (r Result) Overall(metric string) (delta float64, ok bool) {
+	var ratios []float64
+	for _, row := range r.Rows {
+		if row.Metric != metric || row.Base.N == 0 || row.Head.N == 0 {
+			continue
+		}
+		switch b, h := row.Base.Median, row.Head.Median; {
+		case b == h:
+			ratios = append(ratios, 1)
+		case b == 0:
+			return 0, false
+		default:
+			ratios = append(ratios, h/b)
+		}
+	}
+	gm := stats.GeoMean(ratios)
+	if math.IsNaN(gm) {
+		return 0, false
+	}
+	return gm - 1, true
 }
 
 // load reads a file's values by row and the errors of its malformed lines.

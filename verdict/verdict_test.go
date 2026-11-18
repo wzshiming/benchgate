@@ -342,6 +342,49 @@ func TestMalformedBaseLinesAreLeftOut(t *testing.T) {
 	}
 }
 
+func TestOverallIsNotOkWithoutRowsOfTheMetric(t *testing.T) {
+	if _, ok := (verdict.Result{}).Overall("sec/op"); ok {
+		t.Error("ok without rows")
+	}
+	res := compare(t, []bench{{pkgA, "BenchmarkSlower20-8", steady(1000), steady(1200)}}, gate)
+	if _, ok := res.Overall("B/s"); ok {
+		t.Error("ok for B/s, which no row reports")
+	}
+}
+
+func TestOverallLeavesOutRowsOnOneSide(t *testing.T) {
+	res := compare(t, []bench{
+		{pkgA, "BenchmarkDropped-8", steady(400), nil},
+		{pkgA, "BenchmarkSlower20-8", steady(1000), steady(1200)},
+		{pkgA, "BenchmarkAdded-8", nil, steady(300)},
+	}, gate)
+	if delta, ok := res.Overall("sec/op"); !ok || math.Abs(delta-0.2) > 1e-9 {
+		t.Errorf("overall %v, %v; want 0.2, true from the one row on both sides", delta, ok)
+	}
+}
+
+func TestOverallCountsZeroAgainstZeroAsUnchanged(t *testing.T) {
+	res := compare(t, []bench{
+		{pkgA, "BenchmarkBytes-8", sized(same(1000, 10)), sized(same(1440, 10))},
+		{pkgA, "BenchmarkNoBytes-8", sized(same(0, 10)), sized(same(0, 10))},
+	}, gate)
+	if delta, ok := res.Overall("B/op"); !ok || math.Abs(delta-0.2) > 1e-9 {
+		t.Errorf("overall %v, %v; want 0.2, true from ratios 1.44 and 1", delta, ok)
+	}
+}
+
+func TestOverallIsNotOkWithAZeroMedianOnOneSide(t *testing.T) {
+	for _, zero := range []bench{
+		{pkgA, "BenchmarkFromZero-8", sized(same(0, 10)), sized(same(16, 10))},
+		{pkgA, "BenchmarkToZero-8", sized(same(16, 10)), sized(same(0, 10))},
+	} {
+		res := compare(t, []bench{{pkgA, "BenchmarkBytes-8", sized(same(1000, 10)), sized(same(1100, 10))}, zero}, gate)
+		if delta, ok := res.Overall("B/op"); ok {
+			t.Errorf("%s: overall %v, ok; want not ok", zero.name, delta)
+		}
+	}
+}
+
 func BenchmarkCompare(b *testing.B) {
 	base, head := write(b, ab)
 	b.ReportAllocs()
