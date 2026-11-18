@@ -95,6 +95,9 @@ changes the configuration or the calling workflow. Both trees, checked out under
 `.benchgate/`, are built with the Go, 1.21 or newer, named by the head tree's
 `go-version-file` (default `go.mod`), and the gate from the Action's own source.
 `artifact-name` defaults to `benchgate-<job>-<matrix index>-<run attempt>`.
+The output `conclusion` is `pass`, `regression` or `error` as the gate exited 0,
+1 or otherwise, and empty if the gate did not run; `report` is the path of
+`report.md` on the runner, empty unless the gate exited 0 or 1.
 [gate.yml](.github/workflows/gate.yml) gates this repository.
 
 ## When the check is red
