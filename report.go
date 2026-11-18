@@ -263,9 +263,23 @@ func part(b *strings.Builder, heading, intro string, header []string, rows [][]s
 	table(b, header, rows)
 }
 
-// largestFirst orders rows that changed the same way by the size of their change, the largest first.
+// largestFirst orders rows that changed the same way by their change as the Change cell writes it, the largest first.
 func largestFirst(a, b verdict.Row) int {
-	return cmp.Compare(math.Abs(b.Delta), math.Abs(a.Delta))
+	return cmp.Compare(changeSize(plainChange(b)), changeSize(plainChange(a)))
+}
+
+// changeSize is how large a Change cell says a change is: n for n×, 1+p/100 for p%, infinite from or to 0.
+func changeSize(change string) float64 {
+	number, _, _ := strings.Cut(change, " ")
+	if n, ok := strings.CutSuffix(number, "×"); ok {
+		f, _ := strconv.ParseFloat(n, 64)
+		return f
+	}
+	if p, ok := strings.CutSuffix(number, "%"); ok {
+		f, _ := strconv.ParseFloat(p, 64)
+		return 1 + f/100
+	}
+	return math.Inf(1)
 }
 
 // changeCells are a row's Benchmark, Metric, Base, Head and Change cells.

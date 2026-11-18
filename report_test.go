@@ -737,6 +737,41 @@ func TestChangeTablesPutTheLargestChangeFirst(t *testing.T) {
 	}
 }
 
+func TestChangesThatReadTheSameKeepTheirOrder(t *testing.T) {
+	t.Parallel()
+	// Memory and allocations both read 20.0× more though allocations rose more, +1900.16% against +1899.95%.
+	compare := canned{base: samples(bench{"BenchmarkCompare-8", 368970, 166912, 3209}), head: samples(bench{"BenchmarkCompare-8", 7407000, 3338157, 64185})}
+	f := &fake{passes: []map[string]canned{{"cpu": compare}, {"cpu": compare}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 1)
+	var got [][]string
+	for _, r := range rows(section(t, o.report, "## Regressions")) {
+		got = append(got, []string{r[1], r[4]})
+	}
+	if want := [][]string{{"time", "20.1× slower"}, {"memory", "20.0× more"}, {"allocations", "20.0× more"}}; !slices.EqualFunc(got, want, slices.Equal) {
+		t.Errorf("regressions' metrics and changes %q, want %q", got, want)
+	}
+}
+
+func TestChangeDownToZeroIsTheLargest(t *testing.T) {
+	t.Parallel()
+	// BenchmarkB-8 comes first but gets only four times as fast; BenchmarkA-8's memory goes down to 0.
+	improved := canned{
+		base: samples(bench{"BenchmarkB-8", 400, 0, 0}, steady),
+		head: samples(bench{"BenchmarkB-8", 100, 0, 0}, bench{"BenchmarkA-8", 100, 0, 1}),
+	}
+	f := &fake{passes: []map[string]canned{{"cpu": improved}}}
+	o := runGate(t, f.run, t.TempDir(), t.TempDir(), fakeConfig(t))
+	wantCode(t, o, 0)
+	var got []string
+	for _, r := range rows(section(t, o.report, "## Improvements")) {
+		got = append(got, r[4])
+	}
+	if want := []string{"down to 0", "4.0× faster"}; !slices.Equal(got, want) {
+		t.Errorf("improvements' changes %q, want %q", got, want)
+	}
+}
+
 func TestBenchmarkNameCannotOpenOrCloseAFoldedBlock(t *testing.T) {
 	t.Parallel()
 	odd := bench{"BenchmarkA/</details><details>-8", 100, 64, 1}
